@@ -11,10 +11,7 @@
 
 | 파일 | 설명 |
 |------|------|
-| **Setup (설치형, 권장)** | `기찬엑셀_*_x64-setup.exe` — Windows에 설치합니다. xlsx / xls / csv 파일을 더블클릭으로 바로 열 수 있습니다. |
-| **Portable (포터블)** | `기찬엑셀_*_x64-portable.zip` — zip을 풀고 `gichan-excel.exe` 를 실행합니다. USB 등에 넣어 들고 다니기 좋습니다. |
-
-> 처음 쓰신다면 **Setup(설치형)** 을 추천합니다.
+| **Setup (설치형)** | `기찬엑셀_*_x64-setup.exe` — Windows에 설치합니다. xlsx / xls / csv 파일을 더블클릭으로 바로 열 수 있습니다. |
 
 ---
 
@@ -110,24 +107,31 @@ npm install
 npm run tauri dev
 ```
 
-### 설치 파일 / 포터블 빌드
+### 설치 파일 빌드
 
 ```bash
 npm run tauri build
 ```
 
-빌드 결과는 `src-tauri/target/release/bundle/` 에 생성됩니다.
+빌드 결과는 `src-tauri/target/release/bundle/nsis/` 에 생성됩니다.
 
-- `nsis/` — Setup 설치 파일 (`기찬엑셀_*_x64-setup.exe`)
-- `../target/.../release/gichan-excel.exe` — 포터블용 실행 파일 (zip으로 배포)
+- `기찬엑셀_*_x64-setup.exe` — Setup 설치 파일
 
 ### 릴리스 배포
 
-태그를 push하면 GitHub Actions가 Windows용 Setup·Portable을 자동 빌드합니다.
+GitHub Actions **Release** 워크플로우에서 수동 실행하거나, 태그를 push하면 Setup 설치 파일이 자동 빌드됩니다.
+
+**방법 1 — Actions에서 수동 실행 (권장)**
+
+1. [Actions → Release](https://github.com/baggychani/GichanExcel/actions/workflows/release.yml) 로 이동
+2. 우측 **Run workflow** 클릭
+3. 버전 입력 (예: `1.0.1`) 후 실행
+
+**방법 2 — 태그 push**
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 ---
