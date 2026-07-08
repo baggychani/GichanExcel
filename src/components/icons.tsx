@@ -53,3 +53,13 @@ export function AppLogoIcon(props: SVGProps<SVGSVGElement>) {
     </IconBase>
   );
 }
+
+/** 업데이트 알림 — 반짝임 */
+export function SparkleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3" />
+      <path d="M12 8.5 13.4 11.6 16.5 13 13.4 14.4 12 17.5 10.6 14.4 7.5 13 10.6 11.6 12 8.5Z" />
+    </IconBase>
+  );
+}

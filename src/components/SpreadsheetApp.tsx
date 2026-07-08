@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FUniver } from "@univerjs/core/facade";
 import {
@@ -14,9 +15,11 @@ import {
   splitActiveRange,
   type DelimiterMode,
 } from "../lib/text-to-columns";
+import { checkForUpdate, type UpdateInfo } from "../lib/update-checker";
 import { TEXT_SPLIT_EVENT } from "../plugins/text-split";
 import { setupUniver } from "../setup-univer";
 import { APP_VERSION } from "../lib/version";
+import { UpdateDialog } from "./UpdateDialog";
 import { AppLogoIcon, FolderOpenIcon, SaveAsIcon, SaveIcon } from "./icons";
 
 const INITIAL_DOC: DocumentState = { path: null, dirty: false };
@@ -31,6 +34,7 @@ export function SpreadsheetApp() {
   const [customDelimiter, setCustomDelimiter] = useState("");
   const [mergeDelimiters, setMergeDelimiters] = useState(true);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
   const syncTitle = useCallback(async (state: DocumentState) => {
     const title = getWindowTitle(state.path, state.dirty);
@@ -230,6 +234,32 @@ export function SpreadsheetApp() {
     void syncTitle(doc);
   }, [doc, syncTitle]);
 
+  useEffect(() => {
+    let cancelled = false;
+    // 앱이 뜨자마자 알림이 튀어나오지 않도록 살짝 지연 (내부적으로 12시간 스로틀도 적용됨)
+    const timer = setTimeout(() => {
+      void checkForUpdate(APP_VERSION).then((info) => {
+        if (!cancelled && info) {
+          setUpdateInfo(info);
+        }
+      });
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const handleUpdateLater = useCallback(() => setUpdateInfo(null), []);
+
+  const handleUpdateNow = useCallback(() => {
+    if (updateInfo) {
+      void openUrl(updateInfo.url);
+    }
+    setUpdateInfo(null);
+  }, [updateInfo]);
+
   return (
     <div className="app-shell">
       <header className="app-toolbar">
@@ -295,7 +325,7 @@ export function SpreadsheetApp() {
       </main>
 
       {splitDialogOpen ? (
-        <div className="split-dialog-backdrop" role="presentation">
+        <div className="dialog-backdrop" role="presentation">
           <section
             aria-labelledby="split-dialog-title"
             className="split-dialog"
@@ -359,6 +389,15 @@ export function SpreadsheetApp() {
             </footer>
           </section>
         </div>
+      ) : null}
+
+      {updateInfo ? (
+        <UpdateDialog
+          currentVersion={APP_VERSION}
+          info={updateInfo}
+          onLater={handleUpdateLater}
+          onUpdateNow={handleUpdateNow}
+        />
       ) : null}
     </div>
   );
