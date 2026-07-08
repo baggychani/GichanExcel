@@ -1,0 +1,48 @@
+diff --git a/node_modules/@univerjs/ui/lib/es/index.js b/node_modules/@univerjs/ui/lib/es/index.js
+index 6c1e55d..9a266b3 100644
+--- a/node_modules/@univerjs/ui/lib/es/index.js
++++ b/node_modules/@univerjs/ui/lib/es/index.js
+@@ -1927,6 +1927,16 @@ let ShortcutService = class ShortcutService extends Disposable {
+ 		});
+ 	}
+ 	_resolveKeyboardEvent(e) {
++		// ssalmuk patch: global shortcuts (e.g. Alt+Enter line-break) must not fire while
++		// an IME composition (Korean/Japanese/Chinese input) is still in progress. Browsers
++		// keep composing across modifier-only combinations like Alt+Enter, so without this
++		// guard the shortcut's command runs against a document model that doesn't yet contain
++		// the text still sitting in the IME's candidate buffer. When the composition later
++		// commits, it gets written to a now-stale cursor position, producing corrupted text
++		// order (e.g. a line break landing in the wrong place, or text merging into the
++		// previous line). `isComposing` is a standard KeyboardEvent property; keyCode 229 is
++		// the legacy fallback some IMEs/browsers still report during composition.
++		if (e.isComposing || e.keyCode === 229) return;
+ 		const candidate = this.dispatch(e);
+ 		if (candidate) {
+ 			this._commandService.executeCommand(candidate.id, candidate.staticParameters);
+@@ -4425,6 +4435,7 @@ function ContextMenuMenuItem(props) {
+ 	const localeService = useDependency(LocaleService);
+ 	const direction = useObservable(localeService.direction$);
+ 	const menuManagerService = useDependency(IMenuManagerService);
++	const commandService = useDependency(ICommandService);
+ 	const disabled = useObservable(menuItem.disabled$, false);
+ 	const activated = useObservable(menuItem.activated$, false);
+ 	const hidden = useObservable(menuItem.hidden$, false);
+@@ -4519,7 +4530,17 @@ function ContextMenuMenuItem(props) {
+ 	const hiddenById = menuItem.id != null && hiddenItemIds.includes(menuItem.id) || hiddenItemIds.includes(menuKey);
+ 	if (hidden || hiddenById) return null;
+ 	const onChange = (v) => {
+-		setInputValue(isRealNum(v) && typeof v === "string" ? Number.parseInt(v) : v);
++		const parsedValue = isRealNum(v) && typeof v === "string" ? Number.parseInt(v) : v;
++		setInputValue(parsedValue);
++		// Univer 0.25.1 bug workaround (ssalmuk patch): the number input inside a context
++		// menu item (e.g. "Set column width") stops click propagation, so pressing Enter
++		// or clicking the +/- steppers never reaches the row's onClick that actually runs
++		// the command. Execute the command directly here instead, mirroring how the ribbon
++		// toolbar's equivalent input (handleSelectionsValueChange) already behaves.
++		if (!disabled && menuItem.commandId) commandService.executeCommand(menuItem.commandId, {
++			...menuItem.params,
++			value: parsedValue
++		});
+ 	};
+ 	const onSubmenuOptionSelect = (option) => {
+ 		onOptionSelect === null || onOptionSelect === void 0 || onOptionSelect(option);

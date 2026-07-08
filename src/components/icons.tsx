@@ -1,0 +1,55 @@
+import type { SVGProps } from "react";
+
+function IconBase(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+export function FolderOpenIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1H6.5a2 2 0 0 0-1.94 1.51L3 18V7Z" />
+      <path d="M3 18l1.8-6.8A2 2 0 0 1 6.7 9.7H21l-1.9 7.1a2 2 0 0 1-1.93 1.5H5a2 2 0 0 1-2-2Z" />
+    </IconBase>
+  );
+}
+
+export function SaveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+      <path d="M8 3v5h8V3" />
+      <path d="M7 21v-7h10v7" />
+    </IconBase>
+  );
+}
+
+export function SaveAsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M5 3h9l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+      <path d="M8 3v5h6V3" />
+      <path d="M12 13v6M9 16h6" />
+    </IconBase>
+  );
+}
+
+/** 앱 로고 — 스프레드시트 그리드 */
+export function AppLogoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" />
+      <path d="M3.5 9h17M3.5 14.5h17M9 3.5v17M14.5 3.5v17" />
+    </IconBase>
+  );
+}

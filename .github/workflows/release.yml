@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build installer (NSIS Setup)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "기찬엑셀 ${{ github.ref_name }}"
+          releaseBody: |
+            ## 다운로드 안내
+
+            | 종류 | 파일 | 설명 |
+            |------|------|------|
+            | **Setup (권장)** | `기찬엑셀_*_x64-setup.exe` | Windows에 설치합니다. xlsx/xls/csv 파일 연결 포함 |
+            | **Portable** | `기찬엑셀_*_x64-portable.zip` | 설치 없이 exe만 압축 풀어 실행 |
+
+            ### Setup 설치 방법
+            1. `기찬엑셀_*_x64-setup.exe` 를 다운로드합니다.
+            2. 설치 마법사를 따라 진행합니다.
+            3. 시작 메뉴에서 **기찬엑셀**을 실행합니다.
+
+            ### Portable 사용법
+            1. `기찬엑셀_*_x64-portable.zip` 을 원하는 폴더에 압축 해제합니다.
+            2. `gichan-excel.exe` 를 실행합니다.
+            3. PC에 WebView2 런타임이 필요합니다 (Windows 11 / 최신 Windows 10은 기본 포함).
+          releaseDraft: false
+          prerelease: false
+          args: --target x86_64-pc-windows-msvc
+
+      - name: Package portable (zip)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/gichan-excel.exe" -ErrorAction Stop
+          $tag = "${{ github.ref_name }}"
+          $zipName = "기찬엑셀_${tag}_x64-portable.zip"
+          Compress-Archive -Path $exe.FullName -DestinationPath $zipName -Force
+          Write-Host "Created $zipName"
+
+      - name: Upload portable zip to release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zipName = "기찬엑셀_${tag}_x64-portable.zip"
+          gh release upload $tag $zipName --clobber
