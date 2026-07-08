@@ -120,10 +120,18 @@ body {
     transform 0.1s ease;
 }
 
-.toolbar-btn svg {
+.toolbar-btn svg,
+.toolbar-emoji {
   width: 15px;
   height: 15px;
   flex-shrink: 0;
+}
+
+.toolbar-emoji {
+  display: inline-grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .toolbar-btn:hover {

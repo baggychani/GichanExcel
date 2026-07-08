@@ -31,7 +31,7 @@ import { setupUniver } from "../setup-univer";
 import { APP_VERSION } from "../lib/version";
 import { UpdateDialog } from "./UpdateDialog";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
-import { AppLogoIcon, FolderOpenIcon, SaveAsIcon, SaveIcon } from "./icons";
+import { AppLogoIcon } from "./icons";
 
 type UnsavedChoice = "save" | "discard" | "cancel";
 
@@ -51,6 +51,7 @@ export function SpreadsheetApp() {
   const docRef = useRef<DocumentState>(INITIAL_DOC);
   const closeAllowedRef = useRef(false);
   const documentLoadInProgressRef = useRef(false);
+  const suppressDirtyRef = useRef(false);
   const unsavedChoiceResolverRef = useRef<((choice: UnsavedChoice) => void) | null>(
     null,
   );
@@ -76,7 +77,11 @@ export function SpreadsheetApp() {
   }, []);
 
   const markDirty = useCallback(() => {
-    if (documentLoadInProgressRef.current || autoFittingRowsRef.current) {
+    if (
+      documentLoadInProgressRef.current ||
+      autoFittingRowsRef.current ||
+      suppressDirtyRef.current
+    ) {
       return;
     }
 
@@ -257,6 +262,56 @@ export function SpreadsheetApp() {
     return true;
   }, []);
 
+  const runWithoutDirty = useCallback(<T,>(operation: () => T): T => {
+    suppressDirtyRef.current = true;
+    try {
+      return operation();
+    } finally {
+      window.setTimeout(() => {
+        suppressDirtyRef.current = false;
+      }, 0);
+    }
+  }, []);
+
+  const stabilizeSpreadsheetFocus = useCallback(() => {
+    const attempts = [0, 50, 150, 350, 800];
+    const timers = attempts.map((delay) =>
+      window.setTimeout(() => {
+        void getCurrentWindow().setFocus().catch(() => undefined);
+
+        const container = containerRef.current;
+        const univerAPI = univerRef.current;
+        const workbook = univerAPI?.getActiveWorkbook();
+        const sheet = workbook?.getActiveSheet();
+
+        runWithoutDirty(() => {
+          if (workbook && sheet && !workbook.getActiveRange()) {
+            workbook.setActiveRange(sheet.getRange(0, 0));
+          }
+        });
+
+        focusActiveWorkbook();
+
+        const target =
+          container?.querySelector<HTMLElement>(
+            '[data-u-comp="editor"], [data-u-comp="render-canvas"], [data-u-comp="workbench-layout"], canvas',
+          ) ?? container;
+        const active = document.activeElement;
+        if (
+          target &&
+          (!active || active === document.body || active === document.documentElement)
+        ) {
+          if (!target.hasAttribute("tabindex")) {
+            target.setAttribute("tabindex", "-1");
+          }
+          target.focus({ preventScroll: true });
+        }
+      }, delay),
+    );
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [focusActiveWorkbook, runWithoutDirty]);
+
   const handleSplitSelection = useCallback(() => {
     if (!univerRef.current) {
       return;
@@ -373,14 +428,16 @@ export function SpreadsheetApp() {
 
     const app = setupUniver("univer-container");
     univerRef.current = app.univerAPI;
+    const cancelFocusStabilization = stabilizeSpreadsheetFocus();
     setReady(true);
 
     return () => {
+      cancelFocusStabilization();
       setReady(false);
       app.dispose();
       univerRef.current = null;
     };
-  }, []);
+  }, [stabilizeSpreadsheetFocus]);
 
   useEffect(() => {
     if (!ready || !univerRef.current) {
@@ -404,6 +461,7 @@ export function SpreadsheetApp() {
         if (cancelled) {
           return;
         }
+        stabilizeSpreadsheetFocus();
         await applyDocument(state, `열림: ${state.path ?? "알 수 없는 파일"}`);
       })
       .catch((err) => {
@@ -422,7 +480,7 @@ export function SpreadsheetApp() {
     return () => {
       cancelled = true;
     };
-  }, [applyDocument, ready, runDocumentLoad]);
+  }, [applyDocument, ready, runDocumentLoad, stabilizeSpreadsheetFocus]);
 
   useEffect(() => {
     if (!ready || !startupOpenChecked || !univerRef.current) {
@@ -459,6 +517,7 @@ export function SpreadsheetApp() {
         await runDocumentLoad(async () => {
           loadWorkbookData(univerRef.current!, record.snapshot);
         });
+        stabilizeSpreadsheetFocus();
         await applyDocument(
           { path: record.path, dirty: true },
           `자동저장 복구본을 열었습니다. (${savedAt})`,
@@ -471,7 +530,7 @@ export function SpreadsheetApp() {
     return () => {
       cancelled = true;
     };
-  }, [applyDocument, ready, runDocumentLoad, startupOpenChecked]);
+  }, [applyDocument, ready, runDocumentLoad, stabilizeSpreadsheetFocus, startupOpenChecked]);
 
   useEffect(() => {
     const onOpenTextSplit = () => openSplitDialog();
@@ -602,6 +661,7 @@ export function SpreadsheetApp() {
           if (!state) {
             return;
           }
+          stabilizeSpreadsheetFocus();
           return applyDocument(state, `열림: ${state.path ?? "알 수 없는 파일"}`);
         })
         .catch((err) => {
@@ -615,7 +675,7 @@ export function SpreadsheetApp() {
       cancelled = true;
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [applyDocument, confirmUnsavedAction, runDocumentLoad]);
+  }, [applyDocument, confirmUnsavedAction, runDocumentLoad, stabilizeSpreadsheetFocus]);
 
   useEffect(() => {
     void syncTitle(doc);
@@ -672,7 +732,7 @@ export function SpreadsheetApp() {
             title="열기 (Ctrl+O)"
             onClick={() => void handleOpen()}
           >
-            <FolderOpenIcon />
+            <span className="toolbar-emoji" aria-hidden="true">📂</span>
             <span>열기</span>
           </button>
           <button
@@ -681,7 +741,7 @@ export function SpreadsheetApp() {
             title="다른 이름으로 저장 (Ctrl+Shift+S)"
             onClick={() => void handleSaveAs()}
           >
-            <SaveAsIcon />
+            <span className="toolbar-emoji" aria-hidden="true">📝</span>
             <span>다른 이름으로 저장</span>
           </button>
           <button
@@ -690,7 +750,7 @@ export function SpreadsheetApp() {
             title="저장 (Ctrl+S)"
             onClick={() => void handleSave()}
           >
-            <SaveIcon />
+            <span className="toolbar-emoji" aria-hidden="true">💾</span>
             <span>저장</span>
           </button>
         </div>
@@ -710,7 +770,7 @@ export function SpreadsheetApp() {
         </span>
       </div>
 
-      <main className="app-main" ref={containerRef}>
+      <main className="app-main" ref={containerRef} tabIndex={-1}>
         <div id="univer-container" className="univer-host" />
       </main>
 
