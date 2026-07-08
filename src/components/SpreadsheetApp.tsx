@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import {
   getFileName,
   getWindowTitle,
   loadWorkbookData,
+  openFileBytes,
   openPath,
   openSpreadsheet,
   saveSpreadsheet,
@@ -35,17 +37,27 @@ type UnsavedChoice = "save" | "discard" | "cancel";
 
 const INITIAL_DOC: DocumentState = { path: null, dirty: false };
 
+interface InitialOpenFile {
+  path: string;
+  bytes: number[];
+}
+
+const UNDO_COMMAND_ID = "univer.command.undo";
+const REDO_COMMAND_ID = "univer.command.redo";
+
 export function SpreadsheetApp() {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerRef = useRef<FUniver | null>(null);
   const docRef = useRef<DocumentState>(INITIAL_DOC);
   const closeAllowedRef = useRef(false);
+  const documentLoadInProgressRef = useRef(false);
   const unsavedChoiceResolverRef = useRef<((choice: UnsavedChoice) => void) | null>(
     null,
   );
   const autoFittingRowsRef = useRef(false);
   const [doc, setDoc] = useState<DocumentState>(INITIAL_DOC);
   const [ready, setReady] = useState(false);
+  const [startupOpenChecked, setStartupOpenChecked] = useState(false);
   const [autoSaveVersion, setAutoSaveVersion] = useState(0);
   const [status, setStatus] = useState("새 통합 문서");
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +76,10 @@ export function SpreadsheetApp() {
   }, []);
 
   const markDirty = useCallback(() => {
+    if (documentLoadInProgressRef.current || autoFittingRowsRef.current) {
+      return;
+    }
+
     setDoc((current) => {
       if (current.dirty) {
         return current;
@@ -74,6 +90,17 @@ export function SpreadsheetApp() {
     });
     setAutoSaveVersion((version) => version + 1);
   }, [syncTitle]);
+
+  const runDocumentLoad = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
+    documentLoadInProgressRef.current = true;
+    try {
+      return await operation();
+    } finally {
+      window.setTimeout(() => {
+        documentLoadInProgressRef.current = false;
+      }, 250);
+    }
+  }, []);
 
   const applyDocument = useCallback(
     async (state: DocumentState, message: string) => {
@@ -157,7 +184,7 @@ export function SpreadsheetApp() {
         return;
       }
 
-      const state = await openSpreadsheet(univerRef.current);
+      const state = await runDocumentLoad(() => openSpreadsheet(univerRef.current!));
       await applyDocument(
         state,
         state.path ? `열림: ${state.path}` : "파일을 열었습니다.",
@@ -168,7 +195,7 @@ export function SpreadsheetApp() {
       }
       setError(err instanceof Error ? err.message : "파일을 열지 못했습니다.");
     }
-  }, [applyDocument, confirmUnsavedAction]);
+  }, [applyDocument, confirmUnsavedAction, runDocumentLoad]);
 
   const handleSave = useCallback(async () => {
     try {
@@ -211,6 +238,25 @@ export function SpreadsheetApp() {
     setError(null);
   }, []);
 
+  const focusActiveWorkbook = useCallback(() => {
+    const univerAPI = univerRef.current;
+    const workbook = univerAPI?.getActiveWorkbook();
+    const unitId = workbook?.getId();
+    if (!univerAPI || !unitId) {
+      return false;
+    }
+
+    const instanceService = (
+      univerAPI as unknown as {
+        _univerInstanceService?: {
+          focusUnit: (unitId: string | null) => void;
+        };
+      }
+    )._univerInstanceService;
+    instanceService?.focusUnit(unitId);
+    return true;
+  }, []);
+
   const handleSplitSelection = useCallback(() => {
     if (!univerRef.current) {
       return;
@@ -231,6 +277,95 @@ export function SpreadsheetApp() {
     }
   }, [customDelimiter, delimiterMode, markDirty, mergeDelimiters]);
 
+  const runUndoRedo = useCallback(async (mode: "undo" | "redo") => {
+    const univerAPI = univerRef.current;
+    if (!univerAPI) {
+      return;
+    }
+
+    focusActiveWorkbook();
+    const commandId = mode === "redo" ? REDO_COMMAND_ID : UNDO_COMMAND_ID;
+    const didRun = univerAPI.syncExecuteCommand<object, boolean>(commandId);
+    if (!didRun) {
+      await (mode === "redo" ? univerAPI.redo() : univerAPI.undo());
+    }
+  }, [focusActiveWorkbook]);
+
+  useEffect(() => {
+    // Univer 내장 Ctrl+Z/Ctrl+Y 단축키는 document.activeElement가 특정
+    // data-u-comp="editor" 속성을 가진 요소일 때만 동작하도록 되어 있는데,
+    // Tauri 웹뷰에서는 이 포커스 감지가 불안정해서 되돌리기/다시 실행이
+    // 아예 먹통이 되는 경우가 있습니다. 활성 워크북의 undo()/redo()는 이런
+    // 포커스 조건 없이 바로 스프레드시트 편집 스택을 실행하므로, 여기서 직접
+    // 처리하고 내장 단축키 처리기가 같은 키 입력을 다시 실행하지 않게 막습니다.
+    // (이 effect가 setupUniver보다 먼저 등록되어야 캡처 단계에서 먼저 실행됩니다.)
+    const isEditableFocus = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active) {
+        return false;
+      }
+
+      const tag = active.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        active.isContentEditable ||
+        !!active.closest('input, textarea, [contenteditable="true"]')
+      );
+    };
+
+    const onUndoRedoKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+        return;
+      }
+      if (event.isComposing || event.keyCode === 229) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      const isUndo = key === "z" && !event.shiftKey;
+      const isRedo = (key === "z" && event.shiftKey) || key === "y";
+      if (!isUndo && !isRedo) {
+        return;
+      }
+
+      // 우리 앱 다이얼로그의 입력창(예: 구분자 직접 입력)에 포커스가 있으면
+      // 브라우저 기본 되돌리기 동작을 그대로 둡니다.
+      if (isEditableFocus()) {
+        return;
+      }
+
+      if (!univerRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void runUndoRedo(isRedo ? "redo" : "undo");
+    };
+
+    window.addEventListener("keydown", onUndoRedoKeyDown, true);
+    return () => window.removeEventListener("keydown", onUndoRedoKeyDown, true);
+  }, [runUndoRedo]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const onFocusWorkbook = () => {
+      focusActiveWorkbook();
+    };
+
+    container.addEventListener("focusin", onFocusWorkbook, true);
+    container.addEventListener("pointerdown", onFocusWorkbook, true);
+    return () => {
+      container.removeEventListener("focusin", onFocusWorkbook, true);
+      container.removeEventListener("pointerdown", onFocusWorkbook, true);
+    };
+  }, [focusActiveWorkbook]);
+
   useEffect(() => {
     if (!containerRef.current) {
       return;
@@ -249,6 +384,48 @@ export function SpreadsheetApp() {
 
   useEffect(() => {
     if (!ready || !univerRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    void invoke<InitialOpenFile | null>("initial_open_file")
+      .then(async (file) => {
+        if (cancelled || !univerRef.current) {
+          return;
+        }
+
+        if (!file) {
+          return;
+        }
+
+        const state = await runDocumentLoad(() =>
+          openFileBytes(univerRef.current!, file.path, file.bytes),
+        );
+        if (cancelled) {
+          return;
+        }
+        await applyDocument(state, `열림: ${state.path ?? "알 수 없는 파일"}`);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "시작 파일을 열지 못했습니다.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setStartupOpenChecked(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyDocument, ready, runDocumentLoad]);
+
+  useEffect(() => {
+    if (!ready || !startupOpenChecked || !univerRef.current) {
       return;
     }
 
@@ -279,7 +456,9 @@ export function SpreadsheetApp() {
           return;
         }
 
-        loadWorkbookData(univerRef.current, record.snapshot);
+        await runDocumentLoad(async () => {
+          loadWorkbookData(univerRef.current!, record.snapshot);
+        });
         await applyDocument(
           { path: record.path, dirty: true },
           `자동저장 복구본을 열었습니다. (${savedAt})`,
@@ -292,7 +471,7 @@ export function SpreadsheetApp() {
     return () => {
       cancelled = true;
     };
-  }, [applyDocument, ready]);
+  }, [applyDocument, ready, runDocumentLoad, startupOpenChecked]);
 
   useEffect(() => {
     const onOpenTextSplit = () => openSplitDialog();
@@ -309,22 +488,11 @@ export function SpreadsheetApp() {
     const disposable = univerAPI.addEvent(
       univerAPI.Event.CommandExecuted,
       () => {
-        markDirty();
         if (autoFittingRowsRef.current) {
           return;
         }
 
-        const workbook = univerAPI.getActiveWorkbook();
-        const sheet = workbook?.getActiveSheet();
-        const activeRange = workbook?.getActiveRange();
-        if (sheet && activeRange) {
-          autoFittingRowsRef.current = true;
-          try {
-            sheet.setRangesAutoHeight([activeRange.getRange()]);
-          } finally {
-            autoFittingRowsRef.current = false;
-          }
-        }
+        markDirty();
       },
     );
 
@@ -428,7 +596,7 @@ export function SpreadsheetApp() {
           if (!canContinue || !univerRef.current || cancelled) {
             return null;
           }
-          return openPath(univerRef.current, event.payload);
+          return runDocumentLoad(() => openPath(univerRef.current!, event.payload));
         })
         .then((state) => {
           if (!state) {
@@ -447,7 +615,7 @@ export function SpreadsheetApp() {
       cancelled = true;
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [applyDocument, confirmUnsavedAction]);
+  }, [applyDocument, confirmUnsavedAction, runDocumentLoad]);
 
   useEffect(() => {
     void syncTitle(doc);

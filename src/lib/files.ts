@@ -428,6 +428,21 @@ export async function openPath(
   return { path, dirty: false };
 }
 
+export async function openFileBytes(
+  univerAPI: FUniver,
+  path: string,
+  bytes: number[] | Uint8Array,
+): Promise<DocumentState> {
+  const ext = getExtension(path);
+  const payload = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  const file = new File([payload], getFileName(path), {
+    type: mimeForExtension(ext),
+  });
+  const workbookData = await importFile(file);
+  loadWorkbookData(univerAPI, workbookData);
+  return { path, dirty: false };
+}
+
 export function getWindowTitle(path: string | null, dirty: boolean): string {
   const prefix = dirty ? "● " : "";
   if (!path) {
