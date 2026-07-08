@@ -11,7 +11,7 @@ export default defineConfig(async () => ({
     format: "es",
   },
   optimizeDeps: {
-    include: ["@univerjs/presets", "@univerjs/preset-sheets-core"],
+    include: ["@univerjs/preset-sheets-core"],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

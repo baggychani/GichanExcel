@@ -15,8 +15,7 @@ import sheetsNoteKoKR from "@univerjs/preset-sheets-note/locales/ko-KR";
 import { UniverSheetsSortPreset } from "@univerjs/preset-sheets-sort";
 import sheetsSortKoKR from "@univerjs/preset-sheets-sort/locales/ko-KR";
 import { CalculationMode } from "@univerjs/sheets-formula";
-import { WrapStrategy } from "@univerjs/core";
-import { createUniver, LocaleType, mergeLocales } from "@univerjs/presets";
+import { LocaleType, mergeLocales, WrapStrategy } from "@univerjs/core";
 import type { FUniver } from "@univerjs/core/facade";
 
 import "@univerjs/preset-sheets-core/lib/index.css";
@@ -28,11 +27,46 @@ import "@univerjs/preset-sheets-hyper-link/lib/index.css";
 import "@univerjs/preset-sheets-note/lib/index.css";
 import "@univerjs/preset-sheets-sort/lib/index.css";
 
+import { createUniver } from "./lib/create-univer";
 import { SsalmukTextSplitPlugin } from "./plugins/text-split";
+
+// Windows에는 기본으로 깔려 있어 "폰트가 없습니다" 경고 없이 바로 쓸 수 있는
+// 한글 시스템 폰트입니다. 그 외 폰트는 폰트 이름 입력창에 직접 타이핑해서
+// 쓸 수 있습니다(설치돼 있으면 바로 적용됩니다).
+const KOREAN_SYSTEM_FONTS = [
+  { value: "Malgun Gothic", label: "맑은 고딕", category: "sans-serif" as const },
+  { value: "Gulim", label: "굴림", category: "sans-serif" as const },
+  { value: "Dotum", label: "돋움", category: "sans-serif" as const },
+  { value: "Batang", label: "바탕", category: "serif" as const },
+  { value: "Gungsuh", label: "궁서", category: "serif" as const },
+];
 
 export interface UniverApp {
   univerAPI: FUniver;
   dispose: () => void;
+}
+
+/**
+ * 새로 만들어지거나 불러온 시트에 공통으로 적용할 기본 동작.
+ * - Google 스프레드시트처럼 기본은 A~Z(26열)만 사용 (단, 더 많은 열을 가진
+ *   파일을 열었을 때는 데이터가 잘리지 않도록 열을 줄이지는 않습니다)
+ * - 셀 텍스트가 길어지면 옆 셀로 흘러넘치지 않고 줄바꿈되도록 기본 서식 지정
+ * - 이미 들어있는 데이터(가져오기/자동저장 복구 등)의 행 높이도 줄바꿈 내용에 맞게 재계산
+ */
+export function applySheetDefaults(univerAPI: FUniver): void {
+  const workbook = univerAPI.getActiveWorkbook();
+  const sheet = workbook?.getActiveSheet();
+  if (!sheet) {
+    return;
+  }
+
+  sheet.setColumnCount(Math.max(26, sheet.getMaxColumns()));
+  sheet.setDefaultStyle({ tb: WrapStrategy.WRAP });
+
+  const dataRange = sheet.getDataRange();
+  if (dataRange) {
+    sheet.setRangesAutoHeight([dataRange.getRange()]);
+  }
 }
 
 export function setupUniver(container: string): UniverApp {
@@ -59,6 +93,9 @@ export function setupUniver(container: string): UniverApp {
         formula: {
           initialFormulaComputing: CalculationMode.FORCED,
         },
+        // 폰트 목록: 자주 쓰는 한글 시스템 폰트를 기본 목록 위에 추가합니다.
+        // 목록에 없는 폰트도 입력창에 직접 타이핑하면 바로 적용됩니다.
+        customFontFamily: KOREAN_SYSTEM_FONTS,
       }),
       UniverSheetsFilterPreset(),
       UniverSheetsSortPreset(),
@@ -72,11 +109,7 @@ export function setupUniver(container: string): UniverApp {
   });
 
   univerAPI.createWorkbook({ name: "기찬엑셀" });
-  const sheet = univerAPI.getActiveWorkbook()?.getActiveSheet();
-  // Google 스프레드시트처럼 A~Z(26열)만 사용
-  sheet?.setColumnCount(26);
-  // Ctrl+Enter 줄바꿈이 셀에 보이도록 기본 텍스트 줄바꿈 활성화
-  sheet?.setDefaultStyle({ tb: WrapStrategy.WRAP });
+  applySheetDefaults(univerAPI);
   univerAPI.getFormula().executeCalculation();
 
   return {

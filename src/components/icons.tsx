@@ -63,3 +63,14 @@ export function SparkleIcon(props: SVGProps<SVGSVGElement>) {
     </IconBase>
   );
 }
+
+/** 저장되지 않은 변경 경고 */
+export function WarningIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 3.5 21 19.5H3L12 3.5Z" strokeLinejoin="round" />
+      <path d="M12 10v4" />
+      <path d="M12 16.8v.1" strokeLinecap="round" />
+    </IconBase>
+  );
+}

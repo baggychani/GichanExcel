@@ -1,10 +1,13 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FUniver } from "@univerjs/core/facade";
 import {
+  getFileName,
   getWindowTitle,
+  loadWorkbookData,
   openPath,
   openSpreadsheet,
   saveSpreadsheet,
@@ -15,19 +18,35 @@ import {
   splitActiveRange,
   type DelimiterMode,
 } from "../lib/text-to-columns";
+import {
+  clearAutoSave,
+  readAutoSave,
+  writeAutoSave,
+} from "../lib/autosave";
 import { checkForUpdate, type UpdateInfo } from "../lib/update-checker";
 import { TEXT_SPLIT_EVENT } from "../plugins/text-split";
 import { setupUniver } from "../setup-univer";
 import { APP_VERSION } from "../lib/version";
 import { UpdateDialog } from "./UpdateDialog";
+import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { AppLogoIcon, FolderOpenIcon, SaveAsIcon, SaveIcon } from "./icons";
+
+type UnsavedChoice = "save" | "discard" | "cancel";
 
 const INITIAL_DOC: DocumentState = { path: null, dirty: false };
 
 export function SpreadsheetApp() {
   const containerRef = useRef<HTMLDivElement>(null);
   const univerRef = useRef<FUniver | null>(null);
+  const docRef = useRef<DocumentState>(INITIAL_DOC);
+  const closeAllowedRef = useRef(false);
+  const unsavedChoiceResolverRef = useRef<((choice: UnsavedChoice) => void) | null>(
+    null,
+  );
+  const autoFittingRowsRef = useRef(false);
   const [doc, setDoc] = useState<DocumentState>(INITIAL_DOC);
+  const [ready, setReady] = useState(false);
+  const [autoSaveVersion, setAutoSaveVersion] = useState(0);
   const [status, setStatus] = useState("새 통합 문서");
   const [error, setError] = useState<string | null>(null);
   const [delimiterMode, setDelimiterMode] = useState<DelimiterMode>("spaces");
@@ -35,6 +54,8 @@ export function SpreadsheetApp() {
   const [mergeDelimiters, setMergeDelimiters] = useState(true);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
+  const [unsavedDialogSaving, setUnsavedDialogSaving] = useState(false);
 
   const syncTitle = useCallback(async (state: DocumentState) => {
     const title = getWindowTitle(state.path, state.dirty);
@@ -51,6 +72,7 @@ export function SpreadsheetApp() {
       void syncTitle(next);
       return next;
     });
+    setAutoSaveVersion((version) => version + 1);
   }, [syncTitle]);
 
   const applyDocument = useCallback(
@@ -59,9 +81,70 @@ export function SpreadsheetApp() {
       setStatus(message);
       setError(null);
       await syncTitle(state);
+      if (!state.dirty) {
+        void clearAutoSave();
+      }
     },
     [syncTitle],
   );
+
+  useEffect(() => {
+    docRef.current = doc;
+  }, [doc]);
+
+  const saveCurrentDocument = useCallback(
+    async (message: string) => {
+      if (!univerRef.current) {
+        return null;
+      }
+
+      const state = await saveSpreadsheet(univerRef.current, docRef.current.path);
+      await applyDocument(state, message);
+      return state;
+    },
+    [applyDocument],
+  );
+
+  const confirmUnsavedAction = useCallback(async (): Promise<boolean> => {
+    if (!docRef.current.dirty) {
+      return true;
+    }
+
+    setUnsavedDialogOpen(true);
+    const choice = await new Promise<UnsavedChoice>((resolve) => {
+      unsavedChoiceResolverRef.current = resolve;
+    });
+
+    unsavedChoiceResolverRef.current = null;
+
+    if (choice === "cancel") {
+      setUnsavedDialogOpen(false);
+      return false;
+    }
+
+    if (choice === "save") {
+      setUnsavedDialogSaving(true);
+      try {
+        await saveCurrentDocument("저장했습니다.");
+      } catch (err) {
+        setUnsavedDialogSaving(false);
+        setUnsavedDialogOpen(false);
+        if (err instanceof Error && err.message === "cancelled") {
+          return false;
+        }
+        setError(err instanceof Error ? err.message : "저장하지 못했습니다.");
+        return false;
+      }
+      setUnsavedDialogSaving(false);
+    }
+
+    setUnsavedDialogOpen(false);
+    return true;
+  }, [saveCurrentDocument]);
+
+  const handleUnsavedChoice = useCallback((choice: UnsavedChoice) => {
+    unsavedChoiceResolverRef.current?.(choice);
+  }, []);
 
   const handleOpen = useCallback(async () => {
     if (!univerRef.current) {
@@ -69,6 +152,11 @@ export function SpreadsheetApp() {
     }
 
     try {
+      const canContinue = await confirmUnsavedAction();
+      if (!canContinue) {
+        return;
+      }
+
       const state = await openSpreadsheet(univerRef.current);
       await applyDocument(
         state,
@@ -80,23 +168,18 @@ export function SpreadsheetApp() {
       }
       setError(err instanceof Error ? err.message : "파일을 열지 못했습니다.");
     }
-  }, [applyDocument]);
+  }, [applyDocument, confirmUnsavedAction]);
 
   const handleSave = useCallback(async () => {
-    if (!univerRef.current) {
-      return;
-    }
-
     try {
-      const state = await saveSpreadsheet(univerRef.current, doc.path);
-      await applyDocument(state, "저장했습니다.");
+      await saveCurrentDocument("저장했습니다.");
     } catch (err) {
       if (err instanceof Error && err.message === "cancelled") {
         return;
       }
       setError(err instanceof Error ? err.message : "저장하지 못했습니다.");
     }
-  }, [applyDocument, doc.path]);
+  }, [saveCurrentDocument]);
 
   const handleSaveAs = useCallback(async () => {
     if (!univerRef.current) {
@@ -155,12 +238,61 @@ export function SpreadsheetApp() {
 
     const app = setupUniver("univer-container");
     univerRef.current = app.univerAPI;
+    setReady(true);
 
     return () => {
+      setReady(false);
       app.dispose();
       univerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!ready || !univerRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    void readAutoSave()
+      .then(async (record) => {
+        if (!record || cancelled || !univerRef.current) {
+          return;
+        }
+
+        const savedAt = new Date(record.savedAt).toLocaleString();
+        const restore = await confirm(
+          `자동저장된 복구본이 있습니다.\n저장 시각: ${savedAt}\n복구할까요?`,
+          {
+            title: "자동저장 복구",
+            kind: "warning",
+            okLabel: "복구",
+            cancelLabel: "삭제",
+          },
+        );
+
+        if (cancelled || !univerRef.current) {
+          return;
+        }
+
+        if (!restore) {
+          await clearAutoSave();
+          return;
+        }
+
+        loadWorkbookData(univerRef.current, record.snapshot);
+        await applyDocument(
+          { path: record.path, dirty: true },
+          `자동저장 복구본을 열었습니다. (${savedAt})`,
+        );
+      })
+      .catch(() => {
+        setError("자동저장 복구본을 읽지 못했습니다.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyDocument, ready]);
 
   useEffect(() => {
     const onOpenTextSplit = () => openSplitDialog();
@@ -176,11 +308,89 @@ export function SpreadsheetApp() {
 
     const disposable = univerAPI.addEvent(
       univerAPI.Event.CommandExecuted,
-      () => markDirty(),
+      () => {
+        markDirty();
+        if (autoFittingRowsRef.current) {
+          return;
+        }
+
+        const workbook = univerAPI.getActiveWorkbook();
+        const sheet = workbook?.getActiveSheet();
+        const activeRange = workbook?.getActiveRange();
+        if (sheet && activeRange) {
+          autoFittingRowsRef.current = true;
+          try {
+            sheet.setRangesAutoHeight([activeRange.getRange()]);
+          } finally {
+            autoFittingRowsRef.current = false;
+          }
+        }
+      },
     );
 
     return () => disposable.dispose();
   }, [markDirty]);
+
+  useEffect(() => {
+    const window = getCurrentWindow();
+    const unlistenPromise = window.onCloseRequested(async (event) => {
+      if (closeAllowedRef.current || !docRef.current.dirty) {
+        return;
+      }
+
+      event.preventDefault();
+      if (unsavedChoiceResolverRef.current) {
+        return;
+      }
+
+      const canClose = await confirmUnsavedAction();
+
+      if (!canClose) {
+        return;
+      }
+
+      closeAllowedRef.current = true;
+      try {
+        await clearAutoSave();
+        await window.destroy();
+      } catch {
+        // destroy()가 실패해도 창이 멈춰있지 않도록 강제로 닫기를 다시 시도합니다.
+        closeAllowedRef.current = false;
+        setError("창을 닫지 못했습니다. 다시 시도해 주세요.");
+      }
+    });
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [confirmUnsavedAction]);
+
+  useEffect(() => {
+    if (!doc.dirty || !univerRef.current) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const workbook = univerRef.current?.getActiveWorkbook();
+      if (!workbook || !docRef.current.dirty) {
+        return;
+      }
+
+      void writeAutoSave({
+        path: docRef.current.path,
+        savedAt: new Date().toISOString(),
+        snapshot: workbook.save(),
+      })
+        .then(() => {
+          setStatus(`자동저장됨 ${new Date().toLocaleTimeString()}`);
+        })
+        .catch(() => {
+          setError("자동저장을 하지 못했습니다.");
+        });
+    }, 4000);
+
+    return () => clearTimeout(timer);
+  }, [autoSaveVersion, doc.dirty]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -213,10 +423,19 @@ export function SpreadsheetApp() {
         return;
       }
 
-      void openPath(univerRef.current, event.payload)
-        .then((state) =>
-          applyDocument(state, `열림: ${state.path ?? "알 수 없는 파일"}`),
-        )
+      void confirmUnsavedAction()
+        .then((canContinue) => {
+          if (!canContinue || !univerRef.current || cancelled) {
+            return null;
+          }
+          return openPath(univerRef.current, event.payload);
+        })
+        .then((state) => {
+          if (!state) {
+            return;
+          }
+          return applyDocument(state, `열림: ${state.path ?? "알 수 없는 파일"}`);
+        })
         .catch((err) => {
           setError(
             err instanceof Error ? err.message : "파일을 열지 못했습니다.",
@@ -228,7 +447,7 @@ export function SpreadsheetApp() {
       cancelled = true;
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [applyDocument]);
+  }, [applyDocument, confirmUnsavedAction]);
 
   useEffect(() => {
     void syncTitle(doc);
@@ -317,7 +536,10 @@ export function SpreadsheetApp() {
           />
           {status}
         </span>
-        {error ? <span className="app-error">{error}</span> : null}
+        <span className="app-status-right">
+          {error ? <span className="app-error">{error}</span> : null}
+          <span className="app-copyright">© 2026 Bae Gichan</span>
+        </span>
       </div>
 
       <main className="app-main" ref={containerRef}>
@@ -391,7 +613,15 @@ export function SpreadsheetApp() {
         </div>
       ) : null}
 
-      {updateInfo ? (
+      {unsavedDialogOpen ? (
+        <UnsavedChangesDialog
+          fileName={doc.path ? getFileName(doc.path) : null}
+          saving={unsavedDialogSaving}
+          onSave={() => handleUnsavedChoice("save")}
+          onDiscard={() => handleUnsavedChoice("discard")}
+          onCancel={() => handleUnsavedChoice("cancel")}
+        />
+      ) : updateInfo ? (
         <UpdateDialog
           currentVersion={APP_VERSION}
           info={updateInfo}

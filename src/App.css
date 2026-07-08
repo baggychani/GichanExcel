@@ -173,6 +173,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
 }
 
 .app-status-dot {
@@ -191,6 +192,18 @@ body {
 .app-error {
   color: #dc2626;
   font-weight: 500;
+}
+
+.app-status-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-copyright {
+  flex-shrink: 0;
+  color: #9ca3af;
 }
 
 .app-main {
@@ -473,6 +486,126 @@ body {
   transform: translateY(1px);
 }
 
+.confirm-dialog {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: min(380px, 100%);
+  padding: 28px 26px 22px;
+  border: 1px solid rgba(17, 24, 39, 0.06);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 24px 48px rgba(15, 23, 42, 0.2);
+  text-align: center;
+}
+
+.confirm-dialog-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 10px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white;
+  box-shadow:
+    0 1px 2px rgba(217, 119, 6, 0.25),
+    0 6px 16px rgba(217, 119, 6, 0.22);
+}
+
+.confirm-dialog-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #111827;
+}
+
+.confirm-dialog-subtitle {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.confirm-dialog-subtitle strong {
+  color: #374151;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.confirm-dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-self: stretch;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.confirm-dialog-actions button {
+  height: 36px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #4b5563;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease,
+    opacity 0.15s ease;
+}
+
+.confirm-dialog-actions button:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+.confirm-dialog-actions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.confirm-dialog-cancel {
+  grid-column: 1;
+}
+
+.confirm-dialog-discard {
+  grid-column: 2;
+}
+
+.confirm-dialog-save {
+  grid-column: 1 / -1;
+  border: none !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #22c55e, #059669) !important;
+  box-shadow:
+    0 1px 2px rgba(5, 150, 105, 0.3),
+    0 4px 10px rgba(5, 150, 105, 0.18);
+}
+
+.confirm-dialog-save:hover:not(:disabled) {
+  background: linear-gradient(135deg, #16a34a, #047857) !important;
+  box-shadow:
+    0 2px 6px rgba(5, 150, 105, 0.35),
+    0 6px 16px rgba(5, 150, 105, 0.22);
+}
+
+.confirm-dialog-save:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 @media (max-width: 760px) {
   .app-toolbar {
     align-items: flex-start;
@@ -482,6 +615,18 @@ body {
   .app-actions {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .app-status {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 18px;
+  }
+
+  .app-status-right {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .split-dialog-controls {

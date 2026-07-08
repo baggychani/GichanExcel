@@ -1,8 +1,8 @@
 [package]
 name = "gichan-excel"
-version = "1.0.0"
+version = "1.0.1"
 description = "기찬엑셀 - 가벼운 스프레드시트"
-authors = ["baggychani"]
+authors = ["Bae Gichan"]
 edition = "2021"
 
 [lib]
