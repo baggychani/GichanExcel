@@ -28,7 +28,7 @@ import "@univerjs/preset-sheets-note/lib/index.css";
 import "@univerjs/preset-sheets-sort/lib/index.css";
 
 import { createUniver } from "./lib/create-univer";
-import { SsalmukTextSplitPlugin } from "./plugins/text-split";
+import { GichanTextSplitPlugin } from "./plugins/text-split";
 
 // Windows에는 기본으로 깔려 있어 "폰트가 없습니다" 경고 없이 바로 쓸 수 있는
 // 한글 시스템 폰트입니다. 그 외 폰트는 폰트 이름 입력창에 직접 타이핑해서
@@ -105,7 +105,7 @@ export function setupUniver(container: string): UniverApp {
       UniverSheetsHyperLinkPreset(),
       UniverSheetsNotePreset(),
     ],
-    plugins: [SsalmukTextSplitPlugin],
+    plugins: [GichanTextSplitPlugin],
   });
 
   univerAPI.createWorkbook({ name: "기찬엑셀" });

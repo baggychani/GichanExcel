@@ -69,14 +69,14 @@ jobs:
           releaseBody: |
             ## 다운로드
 
-            **Setup (설치형)** — `기찬엑셀_*_x64-setup.exe`
+            **Setup (설치형)** — `GichanExcel_*_x64-setup.exe`
 
             Windows에 설치하고 xlsx / xls / csv 파일을 더블클릭으로 바로 열 수 있습니다.
 
             ### 설치 방법
-            1. `기찬엑셀_*_x64-setup.exe` 를 다운로드합니다.
+            1. `GichanExcel_*_x64-setup.exe` 를 다운로드합니다.
             2. 설치 마법사를 따라 진행합니다.
-            3. 시작 메뉴에서 **기찬엑셀**을 실행합니다.
+            3. 시작 메뉴에서 **GichanExcel**을 실행합니다.
           releaseDraft: false
           prerelease: false
           args: --target x86_64-pc-windows-msvc

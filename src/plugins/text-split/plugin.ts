@@ -17,8 +17,8 @@ import { textSplitMenuSchema } from "./schema";
  * `undefined` instead of the real Injector — which is why the menu never
  * registered before.
  */
-export class SsalmukTextSplitPlugin extends Plugin {
-  static override pluginName = "SSALMUK_TEXT_SPLIT_PLUGIN";
+export class GichanTextSplitPlugin extends Plugin {
+  static override pluginName = "GICHAN_TEXT_SPLIT_PLUGIN";
   static override type = UniverInstanceType.UNIVER_SHEET;
 
   protected override _injector: Injector;
@@ -38,5 +38,4 @@ export class SsalmukTextSplitPlugin extends Plugin {
     this._injector.get(IMenuManagerService).mergeMenu(textSplitMenuSchema);
   }
 }
-
 

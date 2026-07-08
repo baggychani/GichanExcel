@@ -6,7 +6,7 @@ index 6c1e55d..9a266b3 100644
  		});
  	}
  	_resolveKeyboardEvent(e) {
-+		// ssalmuk patch: global shortcuts (e.g. Alt+Enter line-break) must not fire while
++		// gichan patch: global shortcuts (e.g. Alt+Enter line-break) must not fire while
 +		// an IME composition (Korean/Japanese/Chinese input) is still in progress. Browsers
 +		// keep composing across modifier-only combinations like Alt+Enter, so without this
 +		// guard the shortcut's command runs against a document model that doesn't yet contain
@@ -34,7 +34,7 @@ index 6c1e55d..9a266b3 100644
 -		setInputValue(isRealNum(v) && typeof v === "string" ? Number.parseInt(v) : v);
 +		const parsedValue = isRealNum(v) && typeof v === "string" ? Number.parseInt(v) : v;
 +		setInputValue(parsedValue);
-+		// Univer 0.25.1 bug workaround (ssalmuk patch): the number input inside a context
++		// Univer 0.25.1 bug workaround (gichan patch): the number input inside a context
 +		// menu item (e.g. "Set column width") stops click propagation, so pressing Enter
 +		// or clicking the +/- steppers never reaches the row's onClick that actually runs
 +		// the command. Execute the command directly here instead, mirroring how the ribbon

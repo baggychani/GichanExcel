@@ -1,0 +1,37 @@
+diff --git a/node_modules/@univerjs/sheets/lib/es/index.js b/node_modules/@univerjs/sheets/lib/es/index.js
+index 73d5e00..bd53f4f 100644
+--- a/node_modules/@univerjs/sheets/lib/es/index.js
++++ b/node_modules/@univerjs/sheets/lib/es/index.js
+@@ -14658,13 +14658,25 @@ const DeltaColumnWidthCommand = {
+ 					endColumn: index
+ 				}))
+ 			};
+-		} else if (rangeType === RANGE_TYPE.COLUMN) redoMutationParams = {
+-			subUnitId,
+-			unitId,
+-			ranges: colSelections.map((s) => Rectangle.clone(s.range)),
+-			colWidth: destColumnWidth
+-		};
+-		else redoMutationParams = {
++		} else if (rangeType === RANGE_TYPE.COLUMN) {
++			const clonedColRanges = colSelections.map((s) => Rectangle.clone(s.range));
++			const selectedColumns = /* @__PURE__ */ new Set();
++			clonedColRanges.forEach((range) => {
++				for (let col = range.startColumn; col <= range.endColumn; col++) selectedColumns.add(col);
++			});
++			const selectedColumnCount = selectedColumns.size || 1;
++			const perColumnDeltaX = deltaX / selectedColumnCount;
++			const distributedColWidth = {};
++			selectedColumns.forEach((col) => {
++				distributedColWidth[col] = Math.max(2, Math.round(worksheet.getColumnWidth(col) + perColumnDeltaX));
++			});
++			redoMutationParams = {
++				subUnitId,
++				unitId,
++				ranges: clonedColRanges,
++				colWidth: distributedColWidth
++			};
++		} else redoMutationParams = {
+ 			subUnitId,
+ 			unitId,
+ 			colWidth: destColumnWidth,

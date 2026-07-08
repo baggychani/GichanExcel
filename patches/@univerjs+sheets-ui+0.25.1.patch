@@ -7,7 +7,7 @@ index f7987c3..498913d 100644
  		}
  		const startRange = getStartRange(range, primary, direction);
 -		const next = jumpOver === 1 ? findNextGapRange(startRange, direction, worksheet) : findNextRange(startRange, direction, worksheet);
-+		// ssalmuk patch: plain arrow-key movement (jumpOver "moveStopeOne") must stop at the
++		// gichan patch: plain arrow-key movement (jumpOver "moveStopeOne") must stop at the
 +		// sheet edge instead of wrapping to the previous/next row/column (Excel behavior).
 +		// `isGoBack` is left at its original default (true) for every other caller of
 +		// findNextRange -- notably Tab/Enter selection stepping in MoveSelectionEnterAndTabCommand,
