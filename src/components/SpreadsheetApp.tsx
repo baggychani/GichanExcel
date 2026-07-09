@@ -1,4 +1,4 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, currentMonitor, LogicalSize } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
@@ -25,6 +25,7 @@ import {
   AUTOSAVE_MAX_INTERVAL_MS,
   clearAutoSave,
   didSnapshotChange,
+  hasWorkbookContent,
   readAutoSave,
   writeAutoSave,
 } from "../lib/autosave";
@@ -47,6 +48,11 @@ interface InitialOpenFile {
 
 const UNDO_COMMAND_ID = "univer.command.undo";
 const REDO_COMMAND_ID = "univer.command.redo";
+const PREFERRED_WINDOW_WIDTH = 1280;
+const PREFERRED_WINDOW_HEIGHT = 860;
+const MIN_WINDOW_WIDTH = 960;
+const MIN_WINDOW_HEIGHT = 640;
+const WINDOW_SCREEN_MARGIN = 40;
 
 /** 열기/클릭만으로 생기는 내부 MUTATION — 사용자 편집으로 보지 않습니다. */
 const IGNORED_MUTATION_IDS = new Set([
@@ -94,6 +100,36 @@ export function SpreadsheetApp() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [unsavedDialogSaving, setUnsavedDialogSaving] = useState(false);
+
+  useEffect(() => {
+    const fitRestoreSizeAndMaximize = async () => {
+      const appWindow = getCurrentWindow();
+      const monitor = await currentMonitor();
+      const scaleFactor = monitor?.scaleFactor ?? 1;
+      const workArea = monitor?.workArea.size;
+
+      const availableWidth = workArea
+        ? Math.floor(workArea.width / scaleFactor) - WINDOW_SCREEN_MARGIN
+        : PREFERRED_WINDOW_WIDTH;
+      const availableHeight = workArea
+        ? Math.floor(workArea.height / scaleFactor) - WINDOW_SCREEN_MARGIN
+        : PREFERRED_WINDOW_HEIGHT;
+
+      const restoreWidth = Math.max(
+        MIN_WINDOW_WIDTH,
+        Math.min(PREFERRED_WINDOW_WIDTH, availableWidth),
+      );
+      const restoreHeight = Math.max(
+        MIN_WINDOW_HEIGHT,
+        Math.min(PREFERRED_WINDOW_HEIGHT, availableHeight),
+      );
+
+      await appWindow.setSize(new LogicalSize(restoreWidth, restoreHeight));
+      await appWindow.maximize();
+    };
+
+    void fitRestoreSizeAndMaximize().catch(() => undefined);
+  }, []);
 
   const syncTitle = useCallback(async (state: DocumentState) => {
     const title = getWindowTitle(state.path, state.dirty);
@@ -647,6 +683,12 @@ export function SpreadsheetApp() {
       }
 
       const snapshot = workbook.save();
+      if (!hasWorkbookContent(snapshot)) {
+        lastAutoSaveFingerprintRef.current = null;
+        lastAutoSaveAtRef.current = Date.now();
+        return;
+      }
+
       const { changed, fingerprint } = didSnapshotChange(
         lastAutoSaveFingerprintRef.current,
         snapshot,

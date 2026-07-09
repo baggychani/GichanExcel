@@ -31,6 +31,19 @@ function snapshotFingerprint(snapshot: IWorkbookData): string {
   return JSON.stringify(snapshot);
 }
 
+function hasObjectValue(value: unknown): boolean {
+  return !!value && typeof value === "object" && Object.keys(value).length > 0;
+}
+
+export function hasWorkbookContent(snapshot: IWorkbookData): boolean {
+  return Object.values(snapshot.sheets ?? {}).some((sheet) => {
+    return (
+      hasObjectValue(sheet.cellData) ||
+      hasObjectValue(sheet.mergeData)
+    );
+  });
+}
+
 export async function writeAutoSave(record: AutoSaveRecord): Promise<void> {
   const payload = JSON.stringify(record);
 
