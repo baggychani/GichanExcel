@@ -223,11 +223,14 @@ function parseThemeColors(themeXml: string | null): string[] {
     return [];
   }
 
-  const themeKeys = [
-    "lt1",
+  // OOXML theme 인덱스는 clrScheme XML 자식 순서와 다릅니다.
+  // theme="0" = dk1, theme="1" = lt1 ... (ECMA-376 ST_ThemeColor)
+  // XML에는 보통 lt1, dk1, lt2, dk2 순으로 나오므로 이름→인덱스 매핑이 필요합니다.
+  const themeKeysByIndex = [
     "dk1",
-    "lt2",
+    "lt1",
     "dk2",
+    "lt2",
     "accent1",
     "accent2",
     "accent3",
@@ -238,24 +241,24 @@ function parseThemeColors(themeXml: string | null): string[] {
     "folHlink",
   ];
 
-  return themeKeys.map((key) => {
-    const colorNode = firstChildElement(scheme, key);
-    const srgb = colorNode
-      ? Array.from(colorNode.getElementsByTagName("*")).find(
-          (element) => element.localName === "srgbClr",
-        )
-      : null;
-    const system = colorNode
-      ? Array.from(colorNode.getElementsByTagName("*")).find(
-          (element) => element.localName === "sysClr",
-        )
-      : null;
-    return (
+  const colorByName = new Map<string, string>();
+  Array.from(scheme.children).forEach((colorNode) => {
+    const srgb = Array.from(colorNode.getElementsByTagName("*")).find(
+      (element) => element.localName === "srgbClr",
+    );
+    const system = Array.from(colorNode.getElementsByTagName("*")).find(
+      (element) => element.localName === "sysClr",
+    );
+    const color =
       rgbFromArgb(srgb?.getAttribute("val") ?? null) ??
       rgbFromArgb(system?.getAttribute("lastClr") ?? null) ??
-      ""
-    );
+      "";
+    if (colorNode.localName) {
+      colorByName.set(colorNode.localName, color);
+    }
   });
+
+  return themeKeysByIndex.map((key) => colorByName.get(key) ?? "");
 }
 
 function mapBorderStyle(style: string | null): BorderStyleTypes | null {
@@ -366,6 +369,11 @@ function parseOpenXmlStyles(stylesXml: string | null, themeColors: string[]): IS
     const size = Number(firstChildElement(font, "sz")?.getAttribute("val"));
     if (Number.isFinite(size) && size > 0) {
       style.fs = size;
+    }
+
+    const fontName = firstChildElement(font, "name")?.getAttribute("val");
+    if (fontName) {
+      style.ff = fontName;
     }
 
     const color = parseColor(firstChildElement(font, "color"), themeColors);
@@ -531,20 +539,22 @@ export async function readOpenXmlSheetInfo(
       return null;
     }
 
-    const doc = parseXml(sheetXml);
+    // 큰 시트는 전체 DOM 순회 대신 sheetData 셀만 정규식으로 훑습니다.
+    // (스타일 인덱스만 필요하므로 값/수식 XML은 파싱하지 않습니다.)
     const cellStylesByRef = new Map<string, IStyleData>();
-    Array.from(doc.getElementsByTagName("*")).forEach((cell) => {
-      if (cell.localName !== "c") {
-        return;
-      }
-
-      const ref = cell.getAttribute("r");
-      const styleIndex = Number(cell.getAttribute("s"));
-      const style = styleInfo.styles[styleIndex];
+    const cellTagPattern = /<c\b([^>]*)\/?>/g;
+    let match: RegExpExecArray | null = cellTagPattern.exec(sheetXml);
+    while (match) {
+      const attrs = match[1] ?? "";
+      const ref = /\br="([^"]+)"/.exec(attrs)?.[1];
+      const styleIndexText = /\bs="([^"]+)"/.exec(attrs)?.[1];
+      const styleIndex = styleIndexText === undefined ? NaN : Number(styleIndexText);
+      const style = Number.isInteger(styleIndex) ? styleInfo.styles[styleIndex] : undefined;
       if (ref && style && !isStyleEmpty(style)) {
         cellStylesByRef.set(ref, style);
       }
-    });
+      match = cellTagPattern.exec(sheetXml);
+    }
 
     return { cellStylesByRef };
   } catch (error) {

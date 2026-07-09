@@ -11,6 +11,7 @@ import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { applySheetDefaults } from "../setup-univer";
 import { UNIVER_MODEL_VERSION } from "./workbook-constants";
+import { exportWorkbookToXlsx } from "./xlsx-export";
 import { importExcelWithSheetJs, workbookPreservesImportedLayout } from "./xlsx-import";
 
 const OPEN_SPREADSHEET_FILTERS = [
@@ -283,43 +284,10 @@ async function exportToBuffer(
   }
 
   if (ext === "csv") {
-    return new Promise((resolve, reject) => {
-      LuckyExcel.transformUniverToCsv({
-        snapshot,
-        getBuffer: true,
-        success: (csvContent?: string | Record<string, string>) => {
-          if (typeof csvContent === "string") {
-            resolve(csvContent);
-            return;
-          }
-
-          if (!csvContent) {
-            resolve("");
-            return;
-          }
-
-          const firstSheet = Object.values(csvContent)[0];
-          resolve(firstSheet ?? "");
-        },
-        error: reject,
-      }).catch(reject);
-    });
+    return exportDelimitedText(snapshot, ",");
   }
 
-  return new Promise((resolve, reject) => {
-    LuckyExcel.transformUniverToExcel({
-      snapshot,
-      getBuffer: true,
-      success: (buffer?: ArrayBuffer) => {
-        if (!buffer) {
-          reject(new Error("내보낼 데이터가 없습니다."));
-          return;
-        }
-        resolve(buffer);
-      },
-      error: reject,
-    }).catch(reject);
-  });
+  return exportWorkbookToXlsx(snapshot);
 }
 
 function normalizeSavePath(path: string): string {

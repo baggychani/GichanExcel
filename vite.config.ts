@@ -11,7 +11,13 @@ export default defineConfig(async () => ({
     format: "es",
   },
   optimizeDeps: {
-    include: ["@univerjs/preset-sheets-core"],
+    include: ["@univerjs/preset-sheets-core", "exceljs"],
+  },
+  resolve: {
+    alias: {
+      // ExcelJS 브라우저 번들 (Node fs/stream 의존 회피)
+      exceljs: "exceljs/dist/exceljs.min.js",
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

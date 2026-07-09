@@ -63,6 +63,23 @@ function sheetJsCellToUniverCell(cell: XLSX.CellObject, date1904: boolean): ICel
   const styleFromCellFormat: Pick<ICellData, "s"> =
     cellFormat ? { s: { n: { pattern: cellFormat } } } : {};
 
+  // 수식만 있고 캐시 값이 없는 셀(stub). sheetStubs 없이는 SheetJS가 셀 자체를 버립니다.
+  if (cell.t === "z" || (formula && (cell.v === undefined || cell.v === null) && !cell.w)) {
+    return {
+      ...(formula ? { f: formula } : {}),
+      ...styleFromCellFormat,
+    };
+  }
+
+  if (cell.t === "e") {
+    return {
+      v: cell.w ?? "#ERROR!",
+      t: CellValueType.STRING,
+      ...styleFromCellFormat,
+      ...(formula ? { f: formula } : {}),
+    };
+  }
+
   if (cell.t === "n" && typeof cell.v === "number") {
     return {
       v: cell.v,
@@ -99,12 +116,54 @@ function sheetJsCellToUniverCell(cell: XLSX.CellObject, date1904: boolean): ICel
     return null;
   }
 
+  if (typeof value === "number") {
+    return {
+      v: value,
+      t: CellValueType.NUMBER,
+      ...styleFromCellFormat,
+      ...(formula ? { f: formula } : {}),
+    };
+  }
+
+  if (typeof value === "boolean") {
+    return {
+      v: value,
+      t: CellValueType.BOOLEAN,
+      ...styleFromCellFormat,
+      ...(formula ? { f: formula } : {}),
+    };
+  }
+
   return {
     v: String(value),
     t: CellValueType.STRING,
     ...styleFromCellFormat,
     ...(formula ? { f: formula } : {}),
   };
+}
+
+function countImportedCells(workbookData: IWorkbookData): number {
+  return Object.values(workbookData.sheets ?? {}).reduce((total, sheet) => {
+    const cellData = sheet.cellData ?? {};
+    return (
+      total +
+      Object.values(cellData).reduce(
+        (rowTotal, row) => rowTotal + Object.keys(row ?? {}).length,
+        0,
+      )
+    );
+  }, 0);
+}
+
+function sheetJsLooksPopulated(workbook: XLSX.WorkBook): boolean {
+  return workbook.SheetNames.some((sheetName) => {
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) {
+      return false;
+    }
+    // !ref만 있고 셀이 없는 빈 시트는 "내용 있음"으로 보지 않습니다.
+    return Object.keys(worksheet).some((key) => !key.startsWith("!"));
+  });
 }
 
 function mergeCellStyles(...styles: Array<ICellData["s"] | undefined>): IStyleData | undefined {
@@ -148,12 +207,24 @@ function createStyleRegistry() {
 
 export async function importExcelWithSheetJs(file: File): Promise<IWorkbookData> {
   const buffer = await file.arrayBuffer();
+  if (buffer.byteLength === 0) {
+    throw new Error("파일이 비어 있습니다.");
+  }
+
   const workbook = XLSX.read(buffer, {
     type: "array",
     cellDates: false,
     cellNF: true,
+    // community 빌드에서는 스타일이 거의 안 오지만, 켜 둬도 해롭지 않습니다.
     cellStyles: true,
+    // 값 없는 수식 셀을 버리지 않습니다. (없으면 "열렸는데 비어 보임"으로 이어질 수 있음)
+    sheetStubs: true,
   });
+
+  if (!workbook.SheetNames.length) {
+    throw new Error("시트 정보를 읽지 못했습니다. 파일이 손상되었거나 지원하지 않는 형식일 수 있습니다.");
+  }
+
   const styleInfo = await readOpenXmlStyleInfo(buffer);
   const workbookId = crypto.randomUUID();
   const sheetOrder: string[] = [];
@@ -186,6 +257,19 @@ export async function importExcelWithSheetJs(file: File): Promise<IWorkbookData>
       const { r: row, c: column } = XLSX.utils.decode_cell(address);
       const cell = sheetJsCellToUniverCell(worksheet[address] as XLSX.CellObject, date1904);
       if (!cell) {
+        // 값·수식은 없지만 서식만 있는 셀도 스타일은 살려 둡니다.
+        const styleOnly = openXmlSheetInfo?.cellStylesByRef.get(address);
+        if (!styleOnly) {
+          return;
+        }
+        const styleId = styleRegistry.register(styleOnly);
+        if (!styleId) {
+          return;
+        }
+        cellData[row] ??= {};
+        cellData[row][column] = { s: styleId };
+        maxRow = Math.max(maxRow, row);
+        maxColumn = Math.max(maxColumn, column);
         return;
       }
 
@@ -249,7 +333,7 @@ export async function importExcelWithSheetJs(file: File): Promise<IWorkbookData>
     });
   }
 
-  return {
+  const workbookData: IWorkbookData = {
     id: workbookId,
     name: file.name,
     appVersion: UNIVER_MODEL_VERSION,
@@ -259,5 +343,15 @@ export async function importExcelWithSheetJs(file: File): Promise<IWorkbookData>
     sheets,
     custom: { [IMPORTED_LAYOUT_CUSTOM_KEY]: true },
   };
+
+  // SheetJS가 시트를 인식했는데 변환 결과가 완전 빈 문서면, 조용히 빈 시트로
+  // "열림" 처리하지 않고 실패로 돌립니다. (예전 LuckyExcel 빈 화면 이슈와 같은 유형)
+  if (sheetJsLooksPopulated(workbook) && countImportedCells(workbookData) === 0) {
+    throw new Error(
+      "파일은 열렸지만 셀 내용을 읽지 못했습니다. 파일이 손상되었거나 아직 지원하지 않는 형식일 수 있습니다.",
+    );
+  }
+
+  return workbookData;
 }
 
