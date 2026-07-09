@@ -10,6 +10,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { applySheetDefaults } from "../setup-univer";
+import { UNIVER_MODEL_VERSION } from "./workbook-constants";
+import { importExcelWithSheetJs, workbookPreservesImportedLayout } from "./xlsx-import";
 
 const OPEN_SPREADSHEET_FILTERS = [
   {
@@ -46,7 +48,6 @@ const SAVE_SPREADSHEET_FILTERS = [
 ];
 
 const TEXT_FORMAT_EXTENSIONS = new Set(["csv", "tsv", "txt"]);
-const UNIVER_MODEL_VERSION = "0.25.1";
 
 export interface DocumentState {
   path: string | null;
@@ -100,10 +101,11 @@ export function loadWorkbookData(
   }
 
   univerAPI.createWorkbook(workbookData);
-  // 새로 만들어진 워크북에도 줄바꿈 기본값과 행 높이 재계산을 다시 적용합니다.
-  // (createWorkbook은 매번 새 시트를 만들기 때문에 최초 실행 시 지정한 기본값이
-  //  이어지지 않습니다.)
-  applySheetDefaults(univerAPI);
+  // 가져온 통합 문서는 원본 레이아웃을 갖고 있으므로 건드리지 않고,
+  // 일반 텍스트로 만든 통합 문서에만 앱 기본 행/열 값을 적용합니다.
+  if (!workbookPreservesImportedLayout(workbookData)) {
+    applySheetDefaults(univerAPI);
+  }
   univerAPI.getFormula().executeCalculation();
 }
 
@@ -222,11 +224,7 @@ function importFile(file: File): Promise<IWorkbookData> {
       return;
     }
 
-    LuckyExcel.transformExcelToUniver(
-      file,
-      (workbookData: IWorkbookData) => resolve(workbookData),
-      (error: Error) => reject(error),
-    ).catch(reject);
+    importExcelWithSheetJs(file).then(resolve).catch(reject);
   });
 }
 
@@ -408,7 +406,7 @@ export async function saveSpreadsheetAs(
   const ext = getExtension(normalizedPath);
   if (TEXT_FORMAT_EXTENSIONS.has(ext)) {
     const accepted = await confirm(
-      "CSV/TSV/TXT는 활성 시트의 값만 저장하며 서식, 여러 시트, 수식 일부 정보가 보존되지 않을 수 있습니다. 계속 저장할까요?",
+      "CSV/TSV/TXT는 활성 시트의 값만 저장하며, 서식, 여러 시트, 수식 등의 정보가 보존되지 않을 수 있습니다. 계속 저장할까요?",
       {
         title: "텍스트 형식으로 저장",
         kind: "warning",
