@@ -3,11 +3,20 @@ import {
   exists,
   readTextFile,
   remove,
+  rename,
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
 import type { IWorkbookData } from "@univerjs/core";
 
 const AUTOSAVE_FILE = "autosave.json";
+const AUTOSAVE_TEMP_FILE = "autosave.json.tmp";
+
+/**
+ * Google Sheets에 가깝게: 편집이 멈춘 뒤 짧게 쉬면 복구 포인트를 남깁니다.
+ * Excel AutoRecover에 가깝게: 계속 타이핑 중이어도 일정 간격마다 한 번은 남깁니다.
+ */
+export const AUTOSAVE_IDLE_MS = 2_000;
+export const AUTOSAVE_MAX_INTERVAL_MS = 60_000;
 
 export interface AutoSaveRecord {
   path: string | null;
@@ -15,10 +24,29 @@ export interface AutoSaveRecord {
   snapshot: IWorkbookData;
 }
 
+let writeChain: Promise<void> = Promise.resolve();
+
+function snapshotFingerprint(snapshot: IWorkbookData): string {
+  // 전체 JSON stringify는 큰 시트에서 비싸므로, 복구 비교용으로 안정적인 직렬화만 사용합니다.
+  return JSON.stringify(snapshot);
+}
+
 export async function writeAutoSave(record: AutoSaveRecord): Promise<void> {
-  await writeTextFile(AUTOSAVE_FILE, JSON.stringify(record), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
+  const payload = JSON.stringify(record);
+
+  writeChain = writeChain
+    .catch(() => undefined)
+    .then(async () => {
+      await writeTextFile(AUTOSAVE_TEMP_FILE, payload, {
+        baseDir: BaseDirectory.AppLocalData,
+      });
+      await rename(AUTOSAVE_TEMP_FILE, AUTOSAVE_FILE, {
+        oldPathBaseDir: BaseDirectory.AppLocalData,
+        newPathBaseDir: BaseDirectory.AppLocalData,
+      });
+    });
+
+  await writeChain;
 }
 
 export async function readAutoSave(): Promise<AutoSaveRecord | null> {
@@ -38,15 +66,36 @@ export async function readAutoSave(): Promise<AutoSaveRecord | null> {
 }
 
 export async function clearAutoSave(): Promise<void> {
-  const hasAutoSave = await exists(AUTOSAVE_FILE, {
-    baseDir: BaseDirectory.AppLocalData,
+  writeChain = writeChain.catch(() => undefined).then(async () => {
+    const hasAutoSave = await exists(AUTOSAVE_FILE, {
+      baseDir: BaseDirectory.AppLocalData,
+    });
+    if (hasAutoSave) {
+      await remove(AUTOSAVE_FILE, {
+        baseDir: BaseDirectory.AppLocalData,
+      });
+    }
+
+    const hasTemp = await exists(AUTOSAVE_TEMP_FILE, {
+      baseDir: BaseDirectory.AppLocalData,
+    });
+    if (hasTemp) {
+      await remove(AUTOSAVE_TEMP_FILE, {
+        baseDir: BaseDirectory.AppLocalData,
+      });
+    }
   });
 
-  if (!hasAutoSave) {
-    return;
-  }
+  await writeChain;
+}
 
-  await remove(AUTOSAVE_FILE, {
-    baseDir: BaseDirectory.AppLocalData,
-  });
+export function didSnapshotChange(
+  previousFingerprint: string | null,
+  snapshot: IWorkbookData,
+): { changed: boolean; fingerprint: string } {
+  const fingerprint = snapshotFingerprint(snapshot);
+  return {
+    changed: previousFingerprint !== fingerprint,
+    fingerprint,
+  };
 }

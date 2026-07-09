@@ -6,6 +6,7 @@ import {
   type IWorkbookData,
 } from "@univerjs/core";
 import type { FUniver } from "@univerjs/core/facade";
+import { invoke } from "@tauri-apps/api/core";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { applySheetDefaults } from "../setup-univer";
@@ -76,7 +77,14 @@ function mimeForExtension(ext: string): string {
   }
 }
 
+async function allowDocumentPath(path: string): Promise<void> {
+  // 다이얼로그로 고른 경로는 이미 스코프에 들어가지만,
+  // 파일 연결/자동저장 복구처럼 다이얼로그를 거치지 않은 경로는 별도로 허용해야 합니다.
+  await invoke("allow_document_path", { path });
+}
+
 async function pathToFile(path: string): Promise<File> {
+  await allowDocumentPath(path);
   const bytes = await readFile(path);
   const ext = getExtension(path);
   return new File([bytes], getFileName(path), { type: mimeForExtension(ext) });
@@ -328,6 +336,7 @@ async function writeSnapshot(path: string, snapshot: IWorkbookData): Promise<voi
 
   const exportExt = ext === "csv" ? "csv" : ext === "tsv" || ext === "txt" ? "tsv" : "xlsx";
   const payload = await exportToBuffer(snapshot, exportExt);
+  await allowDocumentPath(path);
 
   if (typeof payload === "string") {
     await writeFile(path, new TextEncoder().encode(payload));

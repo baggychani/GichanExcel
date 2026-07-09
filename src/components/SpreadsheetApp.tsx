@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CommandType } from "@univerjs/core";
 import type { FUniver } from "@univerjs/core/facade";
 import {
   getFileName,
@@ -21,7 +22,10 @@ import {
   type DelimiterMode,
 } from "../lib/text-to-columns";
 import {
+  AUTOSAVE_IDLE_MS,
+  AUTOSAVE_MAX_INTERVAL_MS,
   clearAutoSave,
+  didSnapshotChange,
   readAutoSave,
   writeAutoSave,
 } from "../lib/autosave";
@@ -55,7 +59,10 @@ export function SpreadsheetApp() {
   const unsavedChoiceResolverRef = useRef<((choice: UnsavedChoice) => void) | null>(
     null,
   );
-  const autoFittingRowsRef = useRef(false);
+  const lastAutoSaveFingerprintRef = useRef<string | null>(null);
+  const lastAutoSaveAtRef = useRef(0);
+  const autoSaveInFlightRef = useRef(false);
+  const recoveryPromptActiveRef = useRef(false);
   const [doc, setDoc] = useState<DocumentState>(INITIAL_DOC);
   const [ready, setReady] = useState(false);
   const [startupOpenChecked, setStartupOpenChecked] = useState(false);
@@ -77,11 +84,7 @@ export function SpreadsheetApp() {
   }, []);
 
   const markDirty = useCallback(() => {
-    if (
-      documentLoadInProgressRef.current ||
-      autoFittingRowsRef.current ||
-      suppressDirtyRef.current
-    ) {
+    if (documentLoadInProgressRef.current || suppressDirtyRef.current) {
       return;
     }
 
@@ -93,6 +96,7 @@ export function SpreadsheetApp() {
       void syncTitle(next);
       return next;
     });
+    // dirty가 이미 true여도 편집이 이어지면 idle 타이머를 다시 돌립니다.
     setAutoSaveVersion((version) => version + 1);
   }, [syncTitle]);
 
@@ -114,6 +118,8 @@ export function SpreadsheetApp() {
       setError(null);
       await syncTitle(state);
       if (!state.dirty) {
+        lastAutoSaveFingerprintRef.current = null;
+        lastAutoSaveAtRef.current = 0;
         void clearAutoSave();
       }
     },
@@ -488,9 +494,15 @@ export function SpreadsheetApp() {
     }
 
     let cancelled = false;
+    recoveryPromptActiveRef.current = true;
     void readAutoSave()
       .then(async (record) => {
         if (!record || cancelled || !univerRef.current) {
+          return;
+        }
+
+        // 파일 연결로 이미 문서를 연 뒤에는, 같은 파일의 복구본만 제안합니다.
+        if (docRef.current.path && record.path !== docRef.current.path) {
           return;
         }
 
@@ -518,6 +530,9 @@ export function SpreadsheetApp() {
           loadWorkbookData(univerRef.current!, record.snapshot);
         });
         stabilizeSpreadsheetFocus();
+        const { fingerprint } = didSnapshotChange(null, record.snapshot);
+        lastAutoSaveFingerprintRef.current = fingerprint;
+        lastAutoSaveAtRef.current = Date.now();
         await applyDocument(
           { path: record.path, dirty: true },
           `자동저장 복구본을 열었습니다. (${savedAt})`,
@@ -525,10 +540,14 @@ export function SpreadsheetApp() {
       })
       .catch(() => {
         setError("자동저장 복구본을 읽지 못했습니다.");
+      })
+      .finally(() => {
+        recoveryPromptActiveRef.current = false;
       });
 
     return () => {
       cancelled = true;
+      recoveryPromptActiveRef.current = false;
     };
   }, [applyDocument, ready, runDocumentLoad, stabilizeSpreadsheetFocus, startupOpenChecked]);
 
@@ -546,8 +565,10 @@ export function SpreadsheetApp() {
 
     const disposable = univerAPI.addEvent(
       univerAPI.Event.CommandExecuted,
-      () => {
-        if (autoFittingRowsRef.current) {
+      (event) => {
+        // OPERATION(스크롤/선택 등)은 스냅샷에 안 들어가므로 dirty로 치지 않습니다.
+        // COMMAND는 MUTATION을 유발하므로, 실제 데이터 변경은 MUTATION만 추적합니다.
+        if (event.type !== CommandType.MUTATION) {
           return;
         }
 
@@ -566,7 +587,7 @@ export function SpreadsheetApp() {
       }
 
       event.preventDefault();
-      if (unsavedChoiceResolverRef.current) {
+      if (unsavedChoiceResolverRef.current || recoveryPromptActiveRef.current) {
         return;
       }
 
@@ -597,26 +618,60 @@ export function SpreadsheetApp() {
       return;
     }
 
-    const timer = setTimeout(() => {
+    const persistRecoveryPoint = () => {
+      if (autoSaveInFlightRef.current || recoveryPromptActiveRef.current) {
+        return;
+      }
+
       const workbook = univerRef.current?.getActiveWorkbook();
       if (!workbook || !docRef.current.dirty) {
         return;
       }
 
+      const snapshot = workbook.save();
+      const { changed, fingerprint } = didSnapshotChange(
+        lastAutoSaveFingerprintRef.current,
+        snapshot,
+      );
+      if (!changed) {
+        lastAutoSaveAtRef.current = Date.now();
+        return;
+      }
+
+      autoSaveInFlightRef.current = true;
       void writeAutoSave({
         path: docRef.current.path,
         savedAt: new Date().toISOString(),
-        snapshot: workbook.save(),
+        snapshot,
       })
         .then(() => {
+          lastAutoSaveFingerprintRef.current = fingerprint;
+          lastAutoSaveAtRef.current = Date.now();
           setStatus(`자동저장됨 ${new Date().toLocaleTimeString()}`);
         })
         .catch(() => {
           setError("자동저장을 하지 못했습니다.");
+        })
+        .finally(() => {
+          autoSaveInFlightRef.current = false;
         });
-    }, 4000);
+    };
 
-    return () => clearTimeout(timer);
+    // Google Sheets식: 입력이 멈춘 뒤 짧게 쉬면 복구 포인트.
+    const idleTimer = window.setTimeout(persistRecoveryPoint, AUTOSAVE_IDLE_MS);
+
+    // Excel AutoRecover식: 계속 편집 중이어도 최대 간격마다 한 번은 남김.
+    const lastSavedAt = lastAutoSaveAtRef.current;
+    const maxWait =
+      lastSavedAt === 0
+        ? AUTOSAVE_MAX_INTERVAL_MS
+        : Math.max(0, AUTOSAVE_MAX_INTERVAL_MS - (Date.now() - lastSavedAt));
+    const maxTimer = window.setTimeout(persistRecoveryPoint, maxWait);
+
+    return () => {
+      window.clearTimeout(idleTimer);
+      window.clearTimeout(maxTimer);
+    };
   }, [autoSaveVersion, doc.dirty]);
 
   useEffect(() => {
