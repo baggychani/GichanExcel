@@ -387,16 +387,17 @@ export async function saveSpreadsheet(
 
 export async function saveSpreadsheetAs(
   univerAPI: FUniver,
-  _currentPath: string | null,
+  currentPath: string | null,
 ): Promise<DocumentState> {
   const workbook = univerAPI.getActiveWorkbook();
   if (!workbook) {
     throw new Error("열린 통합 문서가 없습니다.");
   }
 
+  // Excel과 같이: 이미 저장된 파일이면 현재 이름을 기본값으로 둡니다.
   const selected = await save({
     filters: SAVE_SPREADSHEET_FILTERS,
-    defaultPath: "새 통합문서.xlsx",
+    defaultPath: currentPath ? getFileName(currentPath) : "새 통합문서.xlsx",
   });
 
   if (!selected) {

@@ -225,6 +225,16 @@ body {
   height: 100%;
 }
 
+/* Univer classic ribbon 탭·툴바는 기본이 가운데 정렬입니다.
+   Excel처럼 왼쪽 정렬로 맞춥니다. */
+.univer-host [data-u-comp="ribbon-header-menu"] [role="tablist"] {
+  justify-content: flex-start;
+}
+
+.univer-host [data-u-comp="ribbon-toolbar"] {
+  justify-content: flex-start;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;

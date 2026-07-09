@@ -4,7 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CommandType } from "@univerjs/core";
 import type { FUniver } from "@univerjs/core/facade";
 import {
   getFileName,
@@ -48,6 +47,25 @@ interface InitialOpenFile {
 
 const UNDO_COMMAND_ID = "univer.command.undo";
 const REDO_COMMAND_ID = "univer.command.redo";
+
+/** 열기/클릭만으로 생기는 내부 MUTATION — 사용자 편집으로 보지 않습니다. */
+const IGNORED_MUTATION_IDS = new Set([
+  "sheet.mutation.set-worksheet-row-auto-height",
+  "sheet.mutation.set-worksheet-row-is-auto-height",
+  "sheet.mutation.set-worksheet-row-height",
+  "sheet.mutation.set-worksheet-col-width",
+  "sheet.mutation.set-worksheet-default-style",
+  "sheet.mutation.set-row-data",
+  "sheet.mutation.set-col-data",
+]);
+
+function isUserDocumentMutation(commandId: string, commandType: number): boolean {
+  // Univer CommandType.MUTATION === 2
+  if (commandType !== 2) {
+    return false;
+  }
+  return !IGNORED_MUTATION_IDS.has(commandId);
+}
 
 export function SpreadsheetApp() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -566,9 +584,9 @@ export function SpreadsheetApp() {
     const disposable = univerAPI.addEvent(
       univerAPI.Event.CommandExecuted,
       (event) => {
-        // OPERATION(스크롤/선택 등)은 스냅샷에 안 들어가므로 dirty로 치지 않습니다.
-        // COMMAND는 MUTATION을 유발하므로, 실제 데이터 변경은 MUTATION만 추적합니다.
-        if (event.type !== CommandType.MUTATION) {
+        // 선택/스크롤 같은 OPERATION은 제외하고, 스냅샷에 남는 MUTATION만 dirty로 봅니다.
+        // 다만 행 자동높이·기본 스타일처럼 열기/클릭 과정에서 생기는 내부 MUTATION은 무시합니다.
+        if (!isUserDocumentMutation(event.id, event.type)) {
           return;
         }
 
