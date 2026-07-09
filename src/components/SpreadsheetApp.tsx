@@ -1,4 +1,4 @@
-import { getCurrentWindow, currentMonitor, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
@@ -25,6 +25,7 @@ import {
   AUTOSAVE_MAX_INTERVAL_MS,
   clearAutoSave,
   didSnapshotChange,
+  documentFingerprint,
   hasWorkbookContent,
   readAutoSave,
   writeAutoSave,
@@ -48,30 +49,23 @@ interface InitialOpenFile {
 
 const UNDO_COMMAND_ID = "univer.command.undo";
 const REDO_COMMAND_ID = "univer.command.redo";
-const PREFERRED_WINDOW_WIDTH = 1280;
-const PREFERRED_WINDOW_HEIGHT = 860;
-const MIN_WINDOW_WIDTH = 960;
-const MIN_WINDOW_HEIGHT = 640;
-const WINDOW_SCREEN_MARGIN = 40;
 
-/** 열기/클릭만으로 생기는 내부 MUTATION — 사용자 편집으로 보지 않습니다. */
-const IGNORED_MUTATION_IDS = new Set([
+/**
+ * 시스템이 알아서 쏘는 mutation만 제외합니다.
+ * - 자동 행높이: 줄바꿈 기본값 때문에 열기/클릭만으로도 발생
+ * - 기본 스타일 적용: 워크북 생성 직후 내부 적용
+ *
+ * 사용자가 직접 한 작업은 dirty로 칩니다.
+ * - 셀 값/수식 입력
+ * - 굵게·색·정렬 등 스타일
+ * - 행/열 수동 크기 조절
+ * - 병합, 삽입/삭제 등
+ */
+const SYSTEM_MUTATION_IDS = new Set([
   "sheet.mutation.set-worksheet-row-auto-height",
   "sheet.mutation.set-worksheet-row-is-auto-height",
-  "sheet.mutation.set-worksheet-row-height",
-  "sheet.mutation.set-worksheet-col-width",
   "sheet.mutation.set-worksheet-default-style",
-  "sheet.mutation.set-row-data",
-  "sheet.mutation.set-col-data",
 ]);
-
-function isUserDocumentMutation(commandId: string, commandType: number): boolean {
-  // Univer CommandType.MUTATION === 2
-  if (commandType !== 2) {
-    return false;
-  }
-  return !IGNORED_MUTATION_IDS.has(commandId);
-}
 
 export function SpreadsheetApp() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -87,6 +81,7 @@ export function SpreadsheetApp() {
   const lastAutoSaveAtRef = useRef(0);
   const autoSaveInFlightRef = useRef(false);
   const recoveryPromptActiveRef = useRef(false);
+  const cleanDocumentFingerprintRef = useRef<string | null>(null);
   const [doc, setDoc] = useState<DocumentState>(INITIAL_DOC);
   const [ready, setReady] = useState(false);
   const [startupOpenChecked, setStartupOpenChecked] = useState(false);
@@ -101,44 +96,41 @@ export function SpreadsheetApp() {
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [unsavedDialogSaving, setUnsavedDialogSaving] = useState(false);
 
-  useEffect(() => {
-    const fitRestoreSizeAndMaximize = async () => {
-      const appWindow = getCurrentWindow();
-      const monitor = await currentMonitor();
-      const scaleFactor = monitor?.scaleFactor ?? 1;
-      const workArea = monitor?.workArea.size;
-
-      const availableWidth = workArea
-        ? Math.floor(workArea.width / scaleFactor) - WINDOW_SCREEN_MARGIN
-        : PREFERRED_WINDOW_WIDTH;
-      const availableHeight = workArea
-        ? Math.floor(workArea.height / scaleFactor) - WINDOW_SCREEN_MARGIN
-        : PREFERRED_WINDOW_HEIGHT;
-
-      const restoreWidth = Math.max(
-        MIN_WINDOW_WIDTH,
-        Math.min(PREFERRED_WINDOW_WIDTH, availableWidth),
-      );
-      const restoreHeight = Math.max(
-        MIN_WINDOW_HEIGHT,
-        Math.min(PREFERRED_WINDOW_HEIGHT, availableHeight),
-      );
-
-      await appWindow.setSize(new LogicalSize(restoreWidth, restoreHeight));
-      await appWindow.maximize();
-    };
-
-    void fitRestoreSizeAndMaximize().catch(() => undefined);
-  }, []);
-
   const syncTitle = useCallback(async (state: DocumentState) => {
     const title = getWindowTitle(state.path, state.dirty);
     document.title = title;
     await getCurrentWindow().setTitle(title);
   }, []);
 
+  const captureCleanFingerprint = useCallback(() => {
+    const workbook = univerRef.current?.getActiveWorkbook();
+    if (!workbook) {
+      cleanDocumentFingerprintRef.current = null;
+      return;
+    }
+    cleanDocumentFingerprintRef.current = documentFingerprint(workbook.save());
+  }, []);
+
   const markDirty = useCallback(() => {
     if (documentLoadInProgressRef.current || suppressDirtyRef.current) {
+      return;
+    }
+
+    const workbook = univerRef.current?.getActiveWorkbook();
+    if (!workbook) {
+      return;
+    }
+
+    const fingerprint = documentFingerprint(workbook.save());
+    // 기준 스냅샷이 아직 없으면 지금 찍고 dirty로 치지 않습니다.
+    // (초기 자동높이/기본스타일 적용이 끝난 뒤 기준이 잡히기 전 구간)
+    if (cleanDocumentFingerprintRef.current === null) {
+      cleanDocumentFingerprintRef.current = fingerprint;
+      return;
+    }
+    // 문서 상태가 기준과 같으면(화살표 이동 등) dirty 아님.
+    // 스타일·행/열 크기·값 변경은 지문이 달라지므로 dirty.
+    if (fingerprint === cleanDocumentFingerprintRef.current) {
       return;
     }
 
@@ -174,10 +166,14 @@ export function SpreadsheetApp() {
       if (!state.dirty) {
         lastAutoSaveFingerprintRef.current = null;
         lastAutoSaveAtRef.current = 0;
+        // 로드/저장 직후 스냅샷을 깨끗한 기준으로 잡습니다.
+        window.setTimeout(() => {
+          captureCleanFingerprint();
+        }, 300);
         void clearAutoSave();
       }
     },
-    [syncTitle],
+    [captureCleanFingerprint, syncTitle],
   );
 
   useEffect(() => {
@@ -612,17 +608,31 @@ export function SpreadsheetApp() {
   }, [openSplitDialog]);
 
   useEffect(() => {
-    const univerAPI = univerRef.current;
-    if (!univerAPI) {
+    if (!ready || !univerRef.current) {
       return;
     }
 
-    const disposable = univerAPI.addEvent(
-      univerAPI.Event.CommandExecuted,
+    // 초기 워크북 생성·기본 스타일 적용이 끝난 뒤 깨끗한 기준을 찍습니다.
+    const timer = window.setTimeout(() => {
+      if (!docRef.current.dirty) {
+        captureCleanFingerprint();
+      }
+    }, 400);
+
+    const disposable = univerRef.current.addEvent(
+      univerRef.current.Event.CommandExecuted,
       (event) => {
-        // 선택/스크롤 같은 OPERATION은 제외하고, 스냅샷에 남는 MUTATION만 dirty로 봅니다.
-        // 다만 행 자동높이·기본 스타일처럼 열기/클릭 과정에서 생기는 내부 MUTATION은 무시합니다.
-        if (!isUserDocumentMutation(event.id, event.type)) {
+        // 선택/화살표 이동은 OPERATION이라 여기 안 옴.
+        if (event.type !== 2) {
+          return;
+        }
+
+        // 자동높이·기본스타일처럼 시스템이 쏘는 mutation은 dirty로 치지 않고,
+        // 아직 깨끗한 문서면 기준 지문만 최신으로 갱신합니다.
+        if (SYSTEM_MUTATION_IDS.has(event.id)) {
+          if (!docRef.current.dirty) {
+            captureCleanFingerprint();
+          }
           return;
         }
 
@@ -630,8 +640,11 @@ export function SpreadsheetApp() {
       },
     );
 
-    return () => disposable.dispose();
-  }, [markDirty]);
+    return () => {
+      window.clearTimeout(timer);
+      disposable.dispose();
+    };
+  }, [captureCleanFingerprint, markDirty, ready]);
 
   useEffect(() => {
     const window = getCurrentWindow();

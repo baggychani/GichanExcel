@@ -26,8 +26,7 @@ export interface AutoSaveRecord {
 
 let writeChain: Promise<void> = Promise.resolve();
 
-function snapshotFingerprint(snapshot: IWorkbookData): string {
-  // 전체 JSON stringify는 큰 시트에서 비싸므로, 복구 비교용으로 안정적인 직렬화만 사용합니다.
+export function snapshotFingerprint(snapshot: IWorkbookData): string {
   return JSON.stringify(snapshot);
 }
 
@@ -39,7 +38,9 @@ export function hasWorkbookContent(snapshot: IWorkbookData): boolean {
   return Object.values(snapshot.sheets ?? {}).some((sheet) => {
     return (
       hasObjectValue(sheet.cellData) ||
-      hasObjectValue(sheet.mergeData)
+      hasObjectValue(sheet.mergeData) ||
+      hasObjectValue(sheet.rowData) ||
+      hasObjectValue(sheet.columnData)
     );
   });
 }
@@ -111,4 +112,29 @@ export function didSnapshotChange(
     changed: previousFingerprint !== fingerprint,
     fingerprint,
   };
+}
+
+/**
+ * dirty 판정용 문서 지문.
+ * - 포함: 셀 값/수식/스타일, 병합, 행·열 크기 등 사용자가 바꾼 문서 상태
+ * - 제외: 선택/스크롤 같은 UI 상태(스냅샷에 원래 없음)
+ */
+export function documentFingerprint(snapshot: IWorkbookData): string {
+  const sheets = Object.entries(snapshot.sheets ?? {}).map(([sheetId, sheet]) => ({
+    id: sheetId,
+    name: sheet.name ?? null,
+    cellData: sheet.cellData ?? {},
+    mergeData: sheet.mergeData ?? [],
+    rowData: sheet.rowData ?? {},
+    columnData: sheet.columnData ?? {},
+    rowCount: sheet.rowCount ?? null,
+    columnCount: sheet.columnCount ?? null,
+    defaultStyle: sheet.defaultStyle ?? null,
+  }));
+
+  return JSON.stringify({
+    sheetOrder: snapshot.sheetOrder ?? [],
+    styles: snapshot.styles ?? {},
+    sheets,
+  });
 }
