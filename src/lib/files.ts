@@ -3,6 +3,7 @@ import {
   CellValueType,
   LocaleType,
   mergeWorksheetSnapshotWithDefault,
+  type ICellData,
   type IWorkbookData,
 } from "@univerjs/core";
 import type { FUniver } from "@univerjs/core/facade";
@@ -235,6 +236,22 @@ function getCellText(snapshot: IWorkbookData, sheetId: string, row: number, colu
   return String(value);
 }
 
+function hasDelimitedExportContent(cell: ICellData | null | undefined): boolean {
+  if (!cell) {
+    return false;
+  }
+
+  if (typeof cell.f === "string" && cell.f.length > 0) {
+    return true;
+  }
+
+  if (cell.v === undefined || cell.v === null) {
+    return false;
+  }
+
+  return typeof cell.v === "string" ? cell.v.length > 0 : true;
+}
+
 function escapeDelimitedValue(value: string, delimiter: string): string {
   if (
     value.includes("\"") ||
@@ -252,16 +269,33 @@ function exportDelimitedText(snapshot: IWorkbookData, delimiter: string): string
   const sheetId = snapshot.sheetOrder[0];
   const sheet = snapshot.sheets[sheetId];
   const cellData = sheet?.cellData ?? {};
-  const rowIndexes = Object.keys(cellData).map(Number);
-  const maxRow = rowIndexes.length ? Math.max(...rowIndexes) : 0;
-  let maxColumn = 0;
+  let maxRow = -1;
+  let maxColumn = -1;
 
-  rowIndexes.forEach((rowIndex) => {
-    const columns = Object.keys(cellData[rowIndex] ?? {}).map(Number);
-    if (columns.length) {
-      maxColumn = Math.max(maxColumn, ...columns);
+  Object.entries(cellData).forEach(([rowIndexText, rowCells]) => {
+    const rowIndex = Number(rowIndexText);
+    if (!Number.isInteger(rowIndex) || rowIndex < 0 || !rowCells) {
+      return;
     }
+
+    Object.entries(rowCells).forEach(([columnIndexText, cell]) => {
+      const columnIndex = Number(columnIndexText);
+      if (
+        !Number.isInteger(columnIndex) ||
+        columnIndex < 0 ||
+        !hasDelimitedExportContent(cell as ICellData | null | undefined)
+      ) {
+        return;
+      }
+
+      maxRow = Math.max(maxRow, rowIndex);
+      maxColumn = Math.max(maxColumn, columnIndex);
+    });
   });
+
+  if (maxRow < 0 || maxColumn < 0) {
+    return "";
+  }
 
   const rows: string[] = [];
   for (let row = 0; row <= maxRow; row += 1) {

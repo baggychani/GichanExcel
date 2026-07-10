@@ -240,6 +240,29 @@ function columnLetter(index: number): string {
   return result;
 }
 
+function normalizeWorksheetName(
+  name: string | undefined,
+  usedNames: Set<string>,
+  fallbackIndex: number,
+): string {
+  const base = (name || `Sheet${fallbackIndex + 1}`)
+    .replace(/[\]\[*?:/\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim() || `Sheet${fallbackIndex + 1}`;
+
+  const maxLength = 31;
+  let candidate = base.slice(0, maxLength);
+  let suffix = 1;
+  while (usedNames.has(candidate.toLowerCase())) {
+    const suffixText = ` (${suffix})`;
+    candidate = `${base.slice(0, maxLength - suffixText.length)}${suffixText}`;
+    suffix += 1;
+  }
+
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
 export async function exportWorkbookToXlsx(snapshot: IWorkbookData): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "GichanExcel";
@@ -254,13 +277,16 @@ export async function exportWorkbookToXlsx(snapshot: IWorkbookData): Promise<Uin
     workbook.addWorksheet("Sheet1");
   }
 
-  for (const sheetId of sheetIds) {
+  const usedSheetNames = new Set<string>();
+  for (const [sheetIndex, sheetId] of sheetIds.entries()) {
     const sheet = snapshot.sheets?.[sheetId];
     if (!sheet) {
       continue;
     }
 
-    const worksheet = workbook.addWorksheet(sheet.name || "Sheet1");
+    const worksheet = workbook.addWorksheet(
+      normalizeWorksheetName(sheet.name, usedSheetNames, sheetIndex),
+    );
     const cellData = sheet.cellData ?? {};
     const rowData = sheet.rowData ?? {};
     const columnData = sheet.columnData ?? {};

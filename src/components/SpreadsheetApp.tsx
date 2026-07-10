@@ -23,10 +23,12 @@ import {
 import {
   AUTOSAVE_IDLE_MS,
   AUTOSAVE_MAX_INTERVAL_MS,
+  announceAutoSaveOwner,
   clearAutoSave,
   didSnapshotChange,
   documentFingerprint,
   hasWorkbookContent,
+  isAutoSaveOwnerActive,
   readAutoSave,
   writeAutoSave,
 } from "../lib/autosave";
@@ -80,6 +82,7 @@ export function SpreadsheetApp() {
   const lastAutoSaveFingerprintRef = useRef<string | null>(null);
   const lastAutoSaveAtRef = useRef(0);
   const autoSaveInFlightRef = useRef(false);
+  const autoSaveOwnerIdRef = useRef(crypto.randomUUID());
   const recoveryPromptActiveRef = useRef(false);
   const cleanDocumentFingerprintRef = useRef<string | null>(null);
   const [doc, setDoc] = useState<DocumentState>(INITIAL_DOC);
@@ -170,7 +173,10 @@ export function SpreadsheetApp() {
         window.setTimeout(() => {
           captureCleanFingerprint();
         }, 300);
-        void clearAutoSave();
+        void clearAutoSave({
+          ownerId: autoSaveOwnerIdRef.current,
+          path: state.path,
+        });
       }
     },
     [captureCleanFingerprint, syncTitle],
@@ -495,6 +501,8 @@ export function SpreadsheetApp() {
     };
   }, [stabilizeSpreadsheetFocus]);
 
+  useEffect(() => announceAutoSaveOwner(autoSaveOwnerIdRef.current), []);
+
   useEffect(() => {
     if (!ready || !univerRef.current) {
       return;
@@ -552,6 +560,14 @@ export function SpreadsheetApp() {
         }
 
         // 파일 연결로 이미 문서를 연 뒤에는, 같은 파일의 복구본만 제안합니다.
+        if (
+          record.ownerId &&
+          record.ownerId !== autoSaveOwnerIdRef.current &&
+          (await isAutoSaveOwnerActive(record.ownerId))
+        ) {
+          return;
+        }
+
         if (docRef.current.path && record.path !== docRef.current.path) {
           return;
         }
@@ -572,7 +588,7 @@ export function SpreadsheetApp() {
         }
 
         if (!restore) {
-          await clearAutoSave();
+          await clearAutoSave({ force: true });
           return;
         }
 
@@ -666,7 +682,10 @@ export function SpreadsheetApp() {
 
       closeAllowedRef.current = true;
       try {
-        await clearAutoSave();
+        await clearAutoSave({
+          ownerId: autoSaveOwnerIdRef.current,
+          path: docRef.current.path,
+        });
         await window.destroy();
       } catch {
         // destroy()가 실패해도 창이 멈춰있지 않도록 강제로 닫기를 다시 시도합니다.
@@ -714,6 +733,7 @@ export function SpreadsheetApp() {
       autoSaveInFlightRef.current = true;
       void writeAutoSave({
         path: docRef.current.path,
+        ownerId: autoSaveOwnerIdRef.current,
         savedAt: new Date().toISOString(),
         snapshot,
       })

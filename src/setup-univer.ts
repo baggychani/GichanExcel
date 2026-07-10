@@ -65,7 +65,15 @@ export function applySheetDefaults(univerAPI: FUniver): void {
 
   const dataRange = sheet.getDataRange();
   if (dataRange) {
-    sheet.setRangesAutoHeight([dataRange.getRange()]);
+    const range = dataRange.getRange();
+    sheet.setRangesAutoHeight([range]);
+
+    for (let row = range.startRow; row <= range.endRow; row += 1) {
+      const height = sheet.getRowHeight(row);
+      if (height > 0) {
+        sheet.setRowHeightsForced(row, 1, height);
+      }
+    }
   }
 }
 
