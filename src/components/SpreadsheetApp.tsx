@@ -14,6 +14,9 @@ import {
   openSpreadsheet,
   saveSpreadsheet,
   saveSpreadsheetAs,
+  readRecentFiles,
+  addRecentFile,
+  clearRecentFiles,
   type DocumentState,
 } from "../lib/files";
 import {
@@ -98,6 +101,8 @@ export function SpreadsheetApp() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [unsavedDialogSaving, setUnsavedDialogSaving] = useState(false);
+  const [recentFiles, setRecentFiles] = useState<string[]>([]);
+  const [recentMenuOpen, setRecentMenuOpen] = useState(false);
 
   const syncTitle = useCallback(async (state: DocumentState) => {
     const title = getWindowTitle(state.path, state.dirty);
@@ -131,9 +136,16 @@ export function SpreadsheetApp() {
       cleanDocumentFingerprintRef.current = fingerprint;
       return;
     }
-    // 문서 상태가 기준과 같으면(화살표 이동 등) dirty 아님.
-    // 스타일·행/열 크기·값 변경은 지문이 달라지므로 dirty.
+    // 문서 상태가 기준과 같으면(되돌리기(Undo)로 완전히 복구된 경우 포함) dirty 아님.
     if (fingerprint === cleanDocumentFingerprintRef.current) {
+      setDoc((current) => {
+        if (!current.dirty) {
+          return current;
+        }
+        const next = { ...current, dirty: false };
+        void syncTitle(next);
+        return next;
+      });
       return;
     }
 
@@ -177,6 +189,9 @@ export function SpreadsheetApp() {
           ownerId: autoSaveOwnerIdRef.current,
           path: state.path,
         });
+      }
+      if (state.path) {
+        void addRecentFile(state.path).then(setRecentFiles);
       }
     },
     [captureCleanFingerprint, syncTitle],
@@ -292,6 +307,54 @@ export function SpreadsheetApp() {
       );
     }
   }, [applyDocument, doc.path]);
+
+  useEffect(() => {
+    void readRecentFiles().then(setRecentFiles);
+  }, []);
+
+  useEffect(() => {
+    if (!recentMenuOpen) {
+      return;
+    }
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(".recent-files-dropdown-container")) {
+        setRecentMenuOpen(false);
+      }
+    };
+    document.addEventListener("click", handleOutsideClick);
+    return () => document.removeEventListener("click", handleOutsideClick);
+  }, [recentMenuOpen]);
+
+  const handleOpenPath = useCallback(async (path: string) => {
+    if (!univerRef.current) {
+      return;
+    }
+
+    try {
+      const canContinue = await confirmUnsavedAction();
+      if (!canContinue) {
+        return;
+      }
+
+      const state = await runDocumentLoad(() => openPath(univerRef.current!, path));
+      await applyDocument(
+        state,
+        state.path ? `열림: ${state.path}` : "파일을 열었습니다.",
+      );
+      setRecentMenuOpen(false);
+    } catch (err) {
+      if (err instanceof Error && err.message === "cancelled") {
+        return;
+      }
+      setError(err instanceof Error ? err.message : "파일을 열지 못했습니다.");
+    }
+  }, [applyDocument, confirmUnsavedAction, runDocumentLoad]);
+
+  const handleClearRecent = useCallback(async () => {
+    await clearRecentFiles();
+    setRecentFiles([]);
+  }, []);
 
   const openSplitDialog = useCallback(() => {
     const workbook = univerRef.current?.getActiveWorkbook();
@@ -874,15 +937,59 @@ export function SpreadsheetApp() {
         </div>
 
         <div className="app-actions">
-          <button
-            type="button"
-            className="toolbar-btn"
-            title="열기 (Ctrl+O)"
-            onClick={() => void handleOpen()}
-          >
-            <span className="toolbar-emoji" aria-hidden="true">📂</span>
-            <span>열기</span>
-          </button>
+          <div className="recent-files-dropdown-container">
+            <div className="split-btn-group">
+              <button
+                type="button"
+                className="toolbar-btn split-btn-main"
+                title="열기 (Ctrl+O)"
+                onClick={() => void handleOpen()}
+              >
+                <span className="toolbar-emoji" aria-hidden="true">📂</span>
+                <span>열기</span>
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn split-btn-arrow"
+                title="최근 작업 문서 목록"
+                onClick={() => setRecentMenuOpen(!recentMenuOpen)}
+              >
+                <span className="split-btn-arrow-icon" aria-hidden="true">▼</span>
+              </button>
+            </div>
+            {recentMenuOpen && (
+              <div className="recent-files-menu">
+                {recentFiles.length === 0 ? (
+                  <div className="recent-file-item recent-file-item--empty">최근 파일이 없습니다.</div>
+                ) : (
+                  <>
+                    <div className="recent-files-menu-list">
+                      {recentFiles.map((path) => (
+                        <button
+                          key={path}
+                          type="button"
+                          className="recent-file-item"
+                          title={path}
+                          onClick={() => void handleOpenPath(path)}
+                        >
+                          <span className="recent-file-name">{getFileName(path)}</span>
+                          <span className="recent-file-path">{path}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="recent-files-menu-divider" />
+                    <button
+                      type="button"
+                      className="recent-file-item recent-file-item--clear"
+                      onClick={() => void handleClearRecent()}
+                    >
+                      목록 지우기
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="toolbar-btn"

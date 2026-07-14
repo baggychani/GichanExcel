@@ -34,6 +34,8 @@ body {
 }
 
 .app-toolbar {
+  position: relative;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -649,5 +651,197 @@ body {
 
   .split-dialog-controls {
     grid-template-columns: 1fr;
+  }
+}
+
+/* 최근 파일 드롭다운 스플릿 버튼 및 메뉴 스타일 */
+.recent-files-dropdown-container {
+  position: relative;
+  display: inline-block;
+}
+
+.split-btn-group {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.split-btn-group:hover {
+  background: rgba(17, 24, 39, 0.04);
+  border-color: rgba(17, 24, 39, 0.15);
+}
+
+.split-btn-main {
+  height: 30px !important;
+  border: none !important;
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 10px 0 12px !important;
+}
+
+.split-btn-main:hover {
+  background: transparent !important;
+}
+
+.split-btn-arrow {
+  height: 30px !important;
+  width: 22px !important;
+  border: none !important;
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid rgba(17, 24, 39, 0.08) !important;
+  cursor: pointer;
+  transition: background 0.15s ease !important;
+}
+
+.split-btn-arrow:hover {
+  background: rgba(17, 24, 39, 0.06) !important;
+}
+
+.split-btn-arrow-icon {
+  font-size: 8px;
+  color: #6b7280;
+  transform: scale(0.9);
+}
+
+.recent-files-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  width: 290px;
+  padding: 5px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  box-shadow: 
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 12px 28px rgba(15, 23, 42, 0.12);
+  transform-origin: top left;
+  animation: slideDownRecent 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideDownRecent {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.recent-files-menu-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-right: 2px;
+}
+
+.recent-files-menu-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.recent-files-menu-list::-webkit-scrollbar-thumb {
+  background: rgba(17, 24, 39, 0.12);
+  border-radius: 2px;
+}
+
+.recent-file-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 7px 11px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.recent-file-item:hover {
+  background: rgba(17, 24, 39, 0.05);
+}
+
+.recent-file-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.recent-file-path {
+  font-size: 10.5px;
+  color: #9ca3af;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  text-align: left;
+}
+
+.recent-file-item--empty {
+  padding: 18px 12px;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.recent-files-menu-divider {
+  height: 1px;
+  background: rgba(17, 24, 39, 0.06);
+  margin: 4px 6px;
+}
+
+.recent-file-item--clear {
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  color: #dc2626 !important;
+  padding: 6px 0 !important;
+}
+
+.recent-file-item--clear:hover {
+  background: rgba(220, 38, 38, 0.08) !important;
+}
+
+@media (max-width: 760px) {
+  .recent-files-dropdown-container {
+    width: 100%;
+  }
+  .split-btn-group {
+    width: 100%;
+  }
+  .split-btn-main {
+    flex: 1;
+  }
+  .recent-files-menu {
+    width: calc(100vw - 36px);
   }
 }

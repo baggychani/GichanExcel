@@ -8,8 +8,9 @@ import {
 } from "@univerjs/core";
 import type { FUniver } from "@univerjs/core/facade";
 import { invoke } from "@tauri-apps/api/core";
+import { BaseDirectory } from "@tauri-apps/api/path";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
-import { readFile, writeFile } from "@tauri-apps/plugin-fs";
+import { exists, readFile, readTextFile, remove, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { applySheetDefaults } from "../setup-univer";
 import { UNIVER_MODEL_VERSION } from "./workbook-constants";
 import { exportWorkbookToXlsx } from "./xlsx-export";
@@ -460,4 +461,56 @@ export function getWindowTitle(path: string | null, dirty: boolean): string {
   }
 
   return `${prefix}${getFileName(path)} - 기찬엑셀`;
+}
+
+const RECENT_FILES_FILE = "recent-files.json";
+const MAX_RECENT_FILES = 10;
+
+export async function readRecentFiles(): Promise<string[]> {
+  try {
+    const hasRecent = await exists(RECENT_FILES_FILE, {
+      baseDir: BaseDirectory.AppLocalData,
+    });
+    if (!hasRecent) {
+      return [];
+    }
+    const content = await readTextFile(RECENT_FILES_FILE, {
+      baseDir: BaseDirectory.AppLocalData,
+    });
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addRecentFile(path: string): Promise<string[]> {
+  if (!path) {
+    return await readRecentFiles();
+  }
+  try {
+    const list = await readRecentFiles();
+    const filtered = list.filter((p) => p !== path);
+    filtered.unshift(path);
+    const updated = filtered.slice(0, MAX_RECENT_FILES);
+    await writeTextFile(RECENT_FILES_FILE, JSON.stringify(updated), {
+      baseDir: BaseDirectory.AppLocalData,
+    });
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
+export async function clearRecentFiles(): Promise<void> {
+  try {
+    const hasRecent = await exists(RECENT_FILES_FILE, {
+      baseDir: BaseDirectory.AppLocalData,
+    });
+    if (hasRecent) {
+      await remove(RECENT_FILES_FILE, {
+        baseDir: BaseDirectory.AppLocalData,
+      });
+    }
+  } catch {}
 }

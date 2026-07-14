@@ -21,7 +21,11 @@ function toArgb(color: string | null | undefined): string | undefined {
     return undefined;
   }
 
-  const hex = color.replace(/[^0-9a-f]/gi, "").toUpperCase();
+  let hex = color.replace(/[^0-9a-f]/gi, "").toUpperCase();
+  if (hex.length === 3) {
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  }
+
   if (hex.length === 6) {
     return `FF${hex}`;
   }

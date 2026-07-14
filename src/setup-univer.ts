@@ -28,6 +28,7 @@ import "@univerjs/preset-sheets-note/lib/index.css";
 import "@univerjs/preset-sheets-sort/lib/index.css";
 
 import { createUniver } from "./lib/create-univer";
+import { installRowAutoHeightFix } from "./lib/row-auto-height";
 import { GichanTextSplitPlugin } from "./plugins/text-split";
 
 // Windows에는 기본으로 깔려 있어 "폰트가 없습니다" 경고 없이 바로 쓸 수 있는
@@ -52,6 +53,8 @@ export interface UniverApp {
  *   파일을 열었을 때는 데이터가 잘리지 않도록 열을 줄이지는 않습니다)
  * - 셀 텍스트가 길어지면 옆 셀로 흘러넘치지 않고 줄바꿈되도록 기본 서식 지정
  * - 이미 들어있는 데이터(가져오기/자동저장 복구 등)의 행 높이도 줄바꿈 내용에 맞게 재계산
+ * - 재계산한 높이는 고정해 두어, 열기/클릭만으로 자동 행높이가 다시 쏘이지 않게 함
+ *   (이후 편집·수식 결과의 행 높이 보정은 installRowAutoHeightFix가 담당)
  */
 export function applySheetDefaults(univerAPI: FUniver): void {
   const workbook = univerAPI.getActiveWorkbook();
@@ -116,12 +119,32 @@ export function setupUniver(container: string): UniverApp {
     plugins: [GichanTextSplitPlugin],
   });
 
+  // 사용자가 하단 '+' 버튼을 눌러 새 시트를 추가할 때도 기본 열 수 제한 및 셀 텍스트 자동 줄바꿈 설정을 동일하게 적용합니다.
+  const commandDisposable = univerAPI.addEvent(
+    univerAPI.Event.CommandExecuted,
+    (event) => {
+      if (event.id === "sheet.command.insert-sheet") {
+        const workbook = univerAPI.getActiveWorkbook();
+        const sheet = workbook?.getActiveSheet();
+        if (sheet) {
+          sheet.setColumnCount(Math.max(26, sheet.getMaxColumns()));
+          sheet.setDefaultStyle({ tb: WrapStrategy.WRAP });
+        }
+      }
+    }
+  );
+
   univerAPI.createWorkbook({ name: "기찬엑셀" });
   applySheetDefaults(univerAPI);
+  const disposeRowAutoHeightFix = installRowAutoHeightFix(univerAPI);
   univerAPI.getFormula().executeCalculation();
 
   return {
     univerAPI,
-    dispose: () => univer.dispose(),
+    dispose: () => {
+      commandDisposable.dispose();
+      disposeRowAutoHeightFix();
+      univer.dispose();
+    },
   };
 }
